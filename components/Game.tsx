@@ -689,8 +689,13 @@ export default function Game() {
                 timedOut={phase === "result" && !!match.kicks.at(-1)?.timedOut}
               />
               <div className="pitch-corner">
-                <span className="stadium-dot" />
-                Squeek Stadium
+                <span
+                  className={`stadium-dot ${feedState === "live" ? "online" : ""}`}
+                  aria-hidden="true"
+                />
+                {feedState === "live"
+                  ? `Round #${live?.round} · Last: ${live?.outcome || "Unknown"}`
+                  : "Live feed unavailable"}
               </div>
               <div className="pitch-corner pitch-corner-right">
                 <Shield size={12} />

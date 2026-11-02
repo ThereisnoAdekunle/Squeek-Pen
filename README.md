@@ -67,6 +67,8 @@ The browser check manages and closes its own bounded preview server. On another 
 
 The build and typecheck pass. The build reports a transitive viem/x402 dynamic-import warning inside Privy; practice has no observed runtime errors. The unneeded optional Farcaster Solana adapter is disabled in the webpack resolver. Privy is loaded only when a real app ID is configured; its complete required runtime chunks remain in the export.
 
+The review revision restores shared dialog centring and shows the live Squeekchain round and last outcome directly on the pitch during phone play. `npm run check:browser` now also checks all shared dialog layouts at 320×568, 390×844 and 1440×900, plus live/unknown/offline pitch captions without overlap. Feed fixtures exist only in the browser test. See the revision record in [VALIDATION.md](VALIDATION.md) and the two finding responses in [.imd-responses.json](.imd-responses.json).
+
 The entire submission is checked against 8,388,608 bytes by `scripts/bundle-budget.mjs`. Source, lockfile, static export, local font, share image, and licenses are retained. No ignore file was changed, and no dependency/cache directory, registry mirror, archive, submodule, or source map is required.
 
 Outfit is bundled under its [SIL Open Font License](public/fonts/OFL.txt). Interface guidance is adapted from Jakub Krehel's Better Interface (MIT); documentation guidance is adapted from Paul Bakaus's Impeccable (Apache-2.0). Their notices and license texts are preserved in [docs/DESIGN-GUIDE-LICENSE.txt](docs/DESIGN-GUIDE-LICENSE.txt).

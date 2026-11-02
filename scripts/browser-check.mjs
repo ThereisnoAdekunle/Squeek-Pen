@@ -50,6 +50,115 @@ async function check(name, fn) {
     console.log(`FAIL ${name}: ${e.message}`);
   }
 }
+async function checkDialogLayout(browser, engine) {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  try {
+    await context.route("https://api.squeekchain.com/**", (route) => route.abort());
+    await context.addInitScript(() => localStorage.removeItem("squeek-tutorial"));
+    for (const [width, height] of [[320, 568], [390, 844], [1440, 900]]) {
+      const page = await context.newPage();
+      page.setDefaultTimeout(12000);
+      await page.setViewportSize({ width, height });
+      await page.goto(url, { waitUntil: "networkidle" });
+      await page.evaluate(() => document.fonts.ready);
+      async function centered(name) {
+        const dialog = page.getByRole("dialog");
+        await dialog.waitFor();
+        const box = await dialog.boundingBox();
+        assert.ok(box, `${name}: missing dialog`);
+        assert.ok(Math.abs(box.x - (width - box.width) / 2) < 1,
+          `${engine} ${width}px ${name}: horizontal centre`);
+        assert.ok(Math.abs(box.y - (height - box.height) / 2) < 1,
+          `${engine} ${width}px ${name}: vertical centre`);
+        assert.ok(box.x >= 16 && box.y >= 19, `${name}: viewport inset`);
+        assert.ok(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),
+          `${name}: no horizontal clipping`);
+        await page.screenshot({ path: resolve(output, `${engine}-${name}-${width}.png`) });
+      }
+      await page.getByRole("button", { name: "Play practice", exact: true }).first().click();
+      await centered("tutorial");
+      // The short viewport must allow the final tutorial action to scroll into view.
+      await page.getByRole("button", { name: "Start my first match" }).click();
+      await page.getByRole("button", { name: "Shoot right", exact: true }).waitFor();
+      await page.getByRole("button", { name: "How to play", exact: true }).filter({ visible: true }).click();
+      await centered("help");
+      await page.keyboard.press("Escape");
+      await page.getByRole("link", { name: "Squeek Penalty home" }).click();
+      await centered("exit");
+      await page.getByRole("button", { name: "Leave match", exact: true }).click();
+      await page.getByRole("button", { name: "Connect with X", exact: true }).click();
+      await centered("login");
+      await page.keyboard.press("Escape");
+      for (const mode of ["Play a friend", "Quick match"]) {
+        await page.getByRole("button", { name: new RegExp(mode) }).click();
+        await centered(mode === "Quick match" ? "quick-match" : "friend");
+        await page.keyboard.press("Escape");
+      }
+      await page.close();
+    }
+  } finally {
+    await context.close();
+  }
+}
+async function checkPitchFeed(browser) {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  try {
+    const page = await context.newPage();
+    let outcome = "Nap";
+    let observedAt = new Date().toISOString();
+    // These fixtures are test-only API responses, never runtime feed defaults.
+    await page.route("https://api.squeekchain.com/v1/**", async (route) => {
+      if (outcome === "offline") return route.abort();
+      const now = Math.floor(Date.parse(observedAt) / 1000);
+      const event = (round, previous, work) => ({
+        eventName: "BatchSettled",
+        arguments: Object.entries({ settledThroughRound: round,
+          previousSettledThroughRound: previous, cumulativeWork: work,
+          activeRoundCount: "1" }).map(([name, value]) => ({ name, value })),
+      });
+      await route.fulfill({ json: route.request().url().endsWith("/status") ? {
+        schemaVersion: 1,
+        measurement: { freshness: "online", observedAt, speedMmPerSecond: 0 },
+      } : {
+        schemaVersion: 1, status: "available",
+        configuration: { genesisTimestamp: String(now - 1042 * 600), roundDuration: "600" },
+        events: outcome === "Unknown" ? [] : [
+          event("1042", "1041", outcome === "Nap" ? "100" : outcome === "Jog" ? "101" : "500"),
+          event("1041", "1040", "100"),
+        ],
+      } });
+    });
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (outcome of ["Nap", "Jog", "Zoomies", "Unknown", "offline"]) {
+        observedAt = new Date().toISOString();
+        await page.goto(url, { waitUntil: "networkidle" });
+        await page.evaluate(() => document.fonts.ready);
+        const corner = page.locator(".pitch-corner").first();
+        const expected = outcome === "offline" ? "Live feed unavailable" : `Round #1043 · Last: ${outcome}`;
+        await page.waitForFunction((text) => document.querySelector(".pitch-corner")?.textContent.trim() === text, expected);
+        assert.equal(await corner.locator(".online").count(), outcome === "offline" ? 0 : 1);
+        const box = await corner.boundingBox();
+        assert.ok(box && box.x >= 0 && box.x + box.width <= width && box.y + box.height < 844,
+          `${width}px ${outcome}: pitch status is on the first screen`);
+        const other = page.locator(".pitch-corner-right");
+        if (await other.isVisible()) {
+          const right = await other.boundingBox();
+          assert.ok(box.x + box.width <= right.x, `${width}px ${outcome}: pitch labels must not overlap`);
+        }
+        if (width === 390 && outcome === "Zoomies") {
+          await page.getByRole("button", { name: "Play practice", exact: true }).first().click();
+          await page.getByRole("button", { name: "Start my first match" }).click();
+          await page.getByRole("button", { name: "Shoot right", exact: true }).waitFor();
+          assert.equal(await corner.innerText(), expected);
+          await page.screenshot({ path: resolve(output, "live-feed-choose-390.png") });
+        }
+      }
+    }
+  } finally {
+    await context.close();
+  }
+}
 try {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -153,13 +262,11 @@ try {
   });
   await check("reduced motion disables running animations", async () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    assert.equal(
-      await page.evaluate(
-        () =>
-          document.getAnimations().filter((a) => a.playState === "running")
-            .length,
-      ),
-      0,
+    // Allow the existing 0.01ms reduced-motion transitions to settle on a frame.
+    await page.waitForFunction(
+      () => document.getAnimations().filter((a) => a.playState === "running").length === 0,
+      undefined,
+      { timeout: 1000 },
     );
     await page.emulateMedia({ reducedMotion: "no-preference" });
   });
@@ -339,6 +446,10 @@ try {
     },
   );
   await context.close();
+  await check("Chromium tutorial, help, exit, login and online dialogs are centred at 320, 390 and 1440px",
+    () => checkDialogLayout(browser, "chromium"));
+  await check("pitch status shows live outcomes, unknown and unavailable without overlap at 320, 390 and 1440px",
+    () => checkPitchFeed(browser));
   try {
     const safari = await webkit.launch({ headless: true });
     const p = await safari.newPage({ viewport: { width: 390, height: 844 } });
@@ -353,6 +464,8 @@ try {
       .getByRole("button", { name: "Dive left" })
       .waitFor({ timeout: 10000 });
     results.push({ name: "WebKit primary interaction", passed: true });
+    await check("WebKit shared dialogs are centred at 320, 390 and 1440px",
+      () => checkDialogLayout(safari, "webkit"));
     await safari.close();
   } catch (e) {
     results.push({

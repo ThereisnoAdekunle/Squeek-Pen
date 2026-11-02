@@ -460,7 +460,10 @@ strong {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #85c2b6;
+  background: var(--color-subtle);
+}
+.stadium-dot.online {
+  background: var(--color-success);
 }
 .pitch-caption,
 .pitch-role,
@@ -1133,6 +1136,7 @@ strong {
   border: none;
   border-radius: 22px;
   padding: 0;
+  margin: auto;
   max-height: calc(100dvh - 40px);
   box-shadow: 0 24px 100px #0008;
   overscroll-behavior: contain;
