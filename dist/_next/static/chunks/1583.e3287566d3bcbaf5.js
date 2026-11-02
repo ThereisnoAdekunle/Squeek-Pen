@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[1583],{21583:(e,n,r)=>{r.r(n),r.d(n,{ConnectOrCreateScreen:()=>o,default:()=>o});var t=r(95155),c=r(17611),l=r(19756);let o={component:()=>{let e=(0,c.a)();return e.loginMethodsAndOrder&&e.loginMethodsAndOrder.primary.length>0?(0,t.jsx)(l.C,{connectOnly:!0}):(0,t.jsx)(l.L,{connectOnly:!0})}}}}]);

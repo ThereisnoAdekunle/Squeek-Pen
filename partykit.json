@@ -1,0 +1,5 @@
+{
+  "name": "squeek-penalty",
+  "main": "party/server.ts",
+  "compatibilityDate": "2025-06-01"
+}
