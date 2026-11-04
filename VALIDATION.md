@@ -1,54 +1,67 @@
 # SQUEEK PENALTY validation
 
-## Hamster advantage and multiplayer revision, 2026-11-04: not run
+## Review revision, 2026-11-04
 
-**No check ran on this revision, and `dist/` was not rebuilt.** Every result further down this file describes the earlier revision.
+The four reported defects reproduced and are fixed. The production export was rebuilt from the corrected source. These are worker-side observations, not independent certification. The account-dependent public launch remains incomplete: no Privy app ID, PartyKit host/deploy access, or GitHub account access was supplied. Those values remain unset; no credentials or endpoints were invented.
 
-The shell could not start in this job. Every command, including `true`, returned:
-
-> Sandbox is required but failed to initialize: Failed to create bridge sockets after 5 attempts. Restart to retry. Running it outside the sandbox (dangerouslyDisableSandbox) is not allowed either.
-
-The browser tool also failed to start:
-
-> Error: async initializeServer: Socket directory path is too long (131 bytes); set PWTEST_SOCKETS_DIR to a shorter location.
-
-Fetching the live API with the web tool returned HTTP 403, so the changes were written against the API format in the earlier job's fixtures.
-
-| Check | Result on this revision |
+| Check on this revision | Actual result |
 | --- | --- |
-| `npm run build` | Not run; `dist/` is the earlier revision |
-| `npm run typecheck` | Not run |
-| `npm test`, including new `tests/hamster.test.ts` and new room tests | Not run; the tests were written and traced by hand only |
-| `npm run check:browser` | Not run |
-| `taste.mjs` design probe | Not run |
-| `npm run check:budget` | Not run; no new runtime dependency was added |
-| First screen at 390 wide | Not re-measured. The new bar under the pitch adds about 40px above the main action, so this needs checking |
-| Real X login, two-player match on deployed services | Not run; needs the owner's Privy app and PartyKit deployment |
+| `npm run build` | Passed; Next static export copied to `dist/` |
+| `npm run typecheck` | Passed (`tsc --noEmit --incremental false`) |
+| `npm test` | 60 passed, 0 failed |
+| `npm run check:browser` | 18 Chromium checks passed, 0 failed; WebKit not performed |
+| Pinned `taste.mjs --out test/scratch/taste --offline` | 16/16 passed at 320, 390 and 1440px, including reduced motion |
+| `node scripts/preview.mjs` inspected through Chromium | HTTP 200 at `/preview/`; current app chunk, advantage bar and relative assets verified |
+| First screen at 390×844 | Product visible; primary action bottom measured at 594.65625px |
+| Live Squeekchain fetch | Browser reported `Failed to fetch`; unavailable-state practice passed; API success cases tested with explicit fixtures |
+| Privy OAuth, embedded wallet, real two-account matches | Not performed: owner service configuration required |
+| Public site / GitHub push | IMD publication after review; owner GitHub/PartyKit operations not performed |
 
-### Better Interface review of this revision
+Commands ran from the repository root. Build, typecheck and tests used `TMPDIR="$PWD/test/scratch"` to keep all installation and build output in disposable scratch space. The existing lockfile and dependency versions were retained. Browser commands set `IMD_PLAYWRIGHT` to the available Playwright module and `PLAYWRIGHT_BROWSERS_PATH` to its installed browsers. Scratch logs/screenshots are verification scaffolding and are not submitted.
 
-This was a source reading only, with no rendered checks.
+The build reported the existing Privy transitive viem/x402 dynamic-import warnings and a workspace-root warning caused by the nested scratch build. It completed successfully. The supplied browser tool could not launch because its temporary socket path was too long; direct Playwright with Chromium's headless shell worked. WebKit was initially absent. Downloading it succeeded, but host validation reported missing GTK/GStreamer/ICU and other shared libraries, so no WebKit, Safari, or physical-device success is claimed.
 
-| Domain | Coverage and result |
-| --- | --- |
-| Accessibility | The advantage is shown by words and an icon as well as the ring color, and is announced at the start of each turn. The reconnect notice uses `role="status"`. The stream link's target height is 32px, below the 44px comfort target. |
-| Layout | The rule and stream link sit in their own row rather than over the pitch, to avoid covering other text. Wrapping is allowed for narrow phones. Not measured. |
-| Writing | Rules state the real effect and the 35% chance. The old line promising "the same fair odds" was removed because it is no longer true. |
-| Typography | Uses the existing `--text-xs` size and weight 600, so the scale stays at six sizes. Not measured. |
-| Colors | Uses existing orange and blue role tokens on the surface color. Contrast not measured. |
-| UI details | The ring is static, so reduced motion needs no special case. Ball and keeper timing changes were not observed. |
+### Reproductions, fixes and regression coverage
 
-### Findings fixed from source reading
-
-| Severity | Source | Problem and fix (none rerun) |
+| Finding | Evidence before the fix | Fix and recheck |
 | --- | --- | --- |
-| High | `components/Game.tsx`, `login` | Login could open behind the native dialog, leaving it unreachable. The dialog now closes first, and the chosen mode reopens after login, including after a redirect. |
-| High | `components/Game.tsx`, online effect | A next turn arriving during a reveal could leave the screen stuck on "locked". It now waits for the reveal to end. |
-| Medium | `party/server.ts`, `onClose` | Any brief connection loss ended the match. Players now get a 30-second seat hold and can rejoin. |
-| Medium | `components/useOnlineMatch.ts` | Quick-match rooms showed a private code to share, and the timer relied on the device clock. Both are fixed. |
-| Medium | `components/Game.tsx`, `animateKick` | The goal announcement named the wrong player for the second seat. It now uses the player's real seat. |
+| `1440fcd1…` stale playable export | `dist/index.html` had no hamster bar. Referenced `app/page-a9868b2700f90bea.js` contained “A sleepy keeper with the same fair odds.” and lacked advantage/reconnect strings. README explicitly said the export was old. | Rebuilt `dist/`. Preview-served HTML now has the bar; referenced runtime contains kicker advantage, reconnect and login-resume code and lacks the obsolete copy. Browser tests play an eligible Zoomies kick (correct dive, goal, 1–0, “Too fast!”), an eligible Nap kick (adjacent dive, save, 0–0, “Long reach!”), and Unknown (normal save). Flight times are 650/1050/850ms respectively. See `scripts/browser-check.mjs:162`. |
+| `3d11db1b…` average mistaken for final round | The exact 101/102 fixture returned Zoomies instead of Nap. Added regressions failed before the parser change. | `rules/hamster.ts:123` reads the final `RoundRecorded`, exact one-round deltas, or evidence of a zero-work tail. Unexplained multi-round work is Unknown; duplicate logs do not inflate evidence. The reported fixture now returns Nap for round 102. Positive, low-work, zero, missing, duplicate and unsettled records are tested in `tests/hamster.test.ts:144`. |
+| `66a49238…` disconnect while starting | With `fetchCore` pending, closing Alice reduced the seats from two to one; the new regression failed with `1 !== 2`. | `party/server.ts:233` enters `starting` and publishes both seats before awaiting the feed. Disconnects use the existing grace period; turn opening and settlement both require two seats. Tests cover rejoining the held seat, rejecting choices during startup, and grace expiry without resurrecting a cancelled match (`tests/rooms.test.ts:374`). |
+| `e0dc5924…` hidden Q private code | The actual hook with isolated state/socket I/O generated QAAAAA, received `waiting`, and returned a null room code. The new assertion failed. The server also allowed joining a nonexistent six-character Q room. | `components/useOnlineMatch.ts:186` identifies quick rooms by the reserved eleven-character pattern. Server join rules use the same pattern. Hook regressions confirm QAAAAA is visible and quick-queue/assigned quick-room codes remain hidden; server rejects nonexistent Q private rooms (`tests/rooms.test.ts:12`). |
 
-## Earlier revision
+The baseline suite passed 51 tests. Adding parser/startup regressions first produced eight failures. Fixing those passed 58 tests; the added hook regression then failed on the old prefix rule. The final suite passes all 60 tests. The original deterministic tests for secret choices, signed identities, timeouts, alternating turns, equal-turn match completion, sudden death, rematch, matchmaking, origin validation, disconnect/rejoin and walkover remain passing.
+
+The browser runner serves the actual production export under `/preview/`. It covers tutorial and keyboard focus return, unavailable login/online states, sound persistence, 320/390/730/900/1440px reflow, local assets/font, reduced motion, a full practice match, X intent score/link, rematch, timeout, leave confirmation, dialog centring, offline practice, pitch captions, and the new advantage scoring cases. Feed and random-number overrides exist only in test contexts, never the production site. Hook tests isolate React state and socket I/O; server tests use generated test signing keys, not real Privy accounts or a deployed PartyKit service.
+
+### Better Interface review
+
+Applied the pinned Better Interface workflow and all six core domains to the changed surfaces, preserving the existing stadium art, tokens, six-size type scale and controls. Reviewed the production screenshots at 390 and 1440px, plus 390px Nap/Zoomies choosing and result states. No additional layout/style defect reproduced, so CSS and unrelated UI behavior were left alone.
+
+| Domain | Coverage and result | Limits |
+| --- | --- | --- |
+| Accessibility | Checked native buttons, labels, keyboard selection, dialog Escape/focus return, status words alongside advantage color, reduced motion and touch-target spacing. Probe: all 13 controls meet the 24px/spacing rule at 390px. | Eight utilities remain below the 44px comfort target, including the 32px stream link (`app/globals.css:586`); direction buttons are about 50px. No screen-reader, forced-colors or physical-device test. |
+| Layout | Checked 320/390/730/900/1440px overflow, shared dialogs, pitch captions, and action visibility with the new bar. 390px screenshots show the game and primary action in the first viewport. | Native 200% zoom and RTL not tested. |
+| Writing | Advantage and percentage copy match scoring. Unknown explicitly means normal rules. Q-prefixed private codes remain shareable. Replaced obsolete export/batch-average statements in README and DESIGN. | Real authenticated X display names and production errors require owner services. |
+| Typography | Reused Outfit and existing source scale (12/14/16/20/28/48px), weights 400/600/800. Probe saw five sizes per viewport; labels and percentages wrap without clipping. | No localization or native text-scaling audit. |
+| Colors | Preserved role tokens and explicit advantage wording/icons. Probe passed all resolved solid-background text pairs at 4.5:1, or 3:1 for large text. | Probe did not measure 39 text boxes over images/gradients; no exhaustive pitch-art contrast claim. |
+| UI | Inspected real exported Nap/Zoomies flight times, rings, result feedback and button lock/release. Sound toggle, recovery logic and shared native dialogs covered by interaction/unit tests. | Audio quality not listened to; live OAuth/reconnect over public services and slowed animation-panel inspection not performed. |
+
+Probe findings: zero failed checks. Five measured font sizes per viewport; first-screen prose is 24 words at 390px. The existing brand wordmark and illustrated stadium are preserved. `DESIGN.md` describes the final source/export rather than the preceding artifact.
+
+Evidence produced in scratch: `old-export.json`, `regressions-before.log`, `hook-before.log`, `build.log`, `typecheck.log`, `tests-final.log`, `served-export.json`, `interactions/results.json`, `interactions/advantage-nap-390.png`, `interactions/scoring-zoomies-390.png`, and `taste/taste.json` with mobile/desktop screenshots. The scratch directory is removed before submission.
+
+### Delivery and limitations
+
+Final bundle measurement: 8,254,728 bytes of 8,388,608; export: 7,253,330 bytes. The conservative total includes source, lockfile, runtime assets and review documentation.
+
+The repository fixes and matching static export are complete for the four review findings. Required Privy runtime chunks, local font, share image, source and lockfile are retained. The final full-tree budget check is recorded below. Its counter excludes the managed runtime’s already-ignored `.cache/` directory; a separate read-only Git file listing confirmed no dependency/cache directories or archives are in the submission. No ignore rule was changed. No existing dependency/build configuration, `lib/`, ignore file, secret file, submodule, or GitHub workflow was modified. `.imd-responses.json` answers each finding.
+
+The owner must supply/configure the Privy app with X login and allowed origins, deploy PartyKit with matching app ID/origin settings, and set the two public values in `public/game-config.json` before real online play can be validated. README contains setup, local preview/rebuild, Vercel and owner GitHub instructions. No public deployment or GitHub push is claimed.
+
+## Earlier revision (historical, superseded)
+
+All sections below retain the previous validation record. They describe the older cosmetic-only export, not the current implementation. The results and limitations above supersede them.
 
 Worker-side checks on the static export, 2026-11-02. These observations are not independent certification.
 

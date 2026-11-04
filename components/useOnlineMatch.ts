@@ -183,7 +183,7 @@ export function useOnlineMatch({
         if (message.type === "waiting") {
           setState("waiting");
           // Quick-match rooms are private to the pair, so their code is never shown.
-          setRoomCode(kind === "quick" || room.startsWith("Q") ? null : room);
+          setRoomCode(kind === "quick" || /^Q[A-HJ-NP-Z2-9]{10}$/.test(room) ? null : room);
           return;
         }
         if (message.type === "state") {

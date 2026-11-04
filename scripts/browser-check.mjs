@@ -159,6 +159,61 @@ async function checkPitchFeed(browser) {
     await context.close();
   }
 }
+async function checkHamsterScoring(browser) {
+  // Test the shipped JS, with API responses and random rolls controlled only here.
+  const event = (eventName, args) => ({
+    eventName,
+    arguments: Object.entries(args).map(([name, value]) => ({ name, value })),
+  });
+  const batch = event("BatchSettled", {
+    settledThroughRound: "102", previousSettledThroughRound: "100",
+    cumulativeWork: "600", activeRoundCount: "1",
+  });
+  const previous = event("BatchSettled", {
+    settledThroughRound: "100", previousSettledThroughRound: "99",
+    cumulativeWork: "0", activeRoundCount: "0",
+  });
+  const cases = [
+    { name: "Zoomies", record: { roundId: "102", work: "600" }, shot: "left", result: "Too fast!", score: "1\n:\n0", ring: "kicker", flight: "650ms" },
+    { name: "Nap", record: { roundId: "101", work: "600" }, shot: "center", result: "Long reach!", score: "0\n:\n0", ring: "keeper", flight: "1050ms" },
+    { name: "Unknown", record: null, shot: "left", result: "What a save!", score: "0\n:\n0", ring: null, flight: "850ms" },
+  ];
+  for (const scenario of cases) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+    try {
+      await context.addInitScript(() => {
+        localStorage.setItem("squeek-tutorial", "seen");
+        Crypto.prototype.getRandomValues = function (values) { values.fill(0); return values; };
+      });
+      await context.route("https://api.squeekchain.com/v1/**", async (route) => {
+        if (route.request().url().endsWith("/status")) return route.abort();
+        await route.fulfill({ json: {
+          schemaVersion: 1, status: "available",
+          configuration: { genesisTimestamp: String(Math.floor(Date.now() / 1000) - 102 * 600), roundDuration: "600" },
+          events: [batch, previous, ...(scenario.record ? [event("RoundRecorded", scenario.record)] : [])],
+        } });
+      });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: "networkidle" });
+      await page.waitForFunction((name) => document.querySelector(".pitch-corner")?.textContent.includes(`Last: ${name}`), scenario.name);
+      const label = scenario.ring ? `${scenario.name}: ${scenario.ring} advantage` : "Normal rules";
+      assert.equal(await page.locator(".hamster-rule").innerText(), label);
+      assert.equal(await page.locator(".hamster-watch").getAttribute("href"), "https://squeekchain.com/");
+      const action = page.getByRole("button", { name: "Play practice", exact: true }).first();
+      const box = await action.boundingBox();
+      assert.ok(box && box.y + box.height < 844, `${scenario.name}: action on first phone screen`);
+      await action.click();
+      if (scenario.ring) assert.ok(await page.locator(`.pitch.advantage-${scenario.ring}`).count());
+      else assert.equal(await page.locator(".pitch.advantage-kicker, .pitch.advantage-keeper").count(), 0);
+      assert.equal(await page.locator(".pitch").evaluate((el) => el.style.getPropertyValue("--flight-time")), scenario.flight);
+      await page.screenshot({ path: resolve(output, `advantage-${scenario.name.toLowerCase()}-390.png`) });
+      await page.getByRole("button", { name: `Shoot ${scenario.shot}`, exact: true }).click();
+      await page.getByText(scenario.result, { exact: true }).waitFor();
+      assert.equal(await page.locator(".score-numbers").innerText(), scenario.score);
+      await page.screenshot({ path: resolve(output, `scoring-${scenario.name.toLowerCase()}-390.png`) });
+    } finally { await context.close(); }
+  }
+}
 try {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -452,6 +507,8 @@ try {
     () => checkDialogLayout(browser, "chromium"));
   await check("pitch status shows live outcomes, unknown and unavailable without overlap at 320, 390 and 1440px",
     () => checkPitchFeed(browser));
+  await check("exported Nap and Zoomies change scoring, flight speed and the advantage bar; unexplained batches use normal rules",
+    () => checkHamsterScoring(browser));
   try {
     const safari = await webkit.launch({ headless: true });
     const p = await safari.newPage({ viewport: { width: 390, height: 844 } });

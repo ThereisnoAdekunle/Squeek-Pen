@@ -121,16 +121,17 @@ function isDigits(value: unknown): value is string {
   return typeof value === "string" && /^\d+$/.test(value);
 }
 function settledOutcome(core: Json) {
-  const batches = (Array.isArray(core.events) ? core.events : [])
-    .filter((e: Json) => e?.eventName === "BatchSettled")
-    .map((e: Json) =>
-      Object.fromEntries(
-        (Array.isArray(e.arguments) ? e.arguments : []).map((a: Json) => [
-          a.name,
-          a.value,
-        ]),
-      ),
-    )
+  const events = (Array.isArray(core.events) ? core.events : []).map((e: Json) => ({
+    name: e?.eventName,
+    args: Object.fromEntries(
+      (Array.isArray(e?.arguments) ? e.arguments : [])
+        .filter((a: Json) => typeof a?.name === "string")
+        .map((a: Json) => [a.name, a.value]),
+    ),
+  }));
+  const batches = events
+    .filter((e: Json) => e.name === "BatchSettled")
+    .map((e: Json) => e.args)
     .filter((b: Json) => isDigits(b.settledThroughRound));
   const latest = batches.reduce(
     (best: Json | null, b: Json) =>
@@ -146,19 +147,47 @@ function settledOutcome(core: Json) {
     BigInt(latest.previousSettledThroughRound);
   if (rounds <= 0n) return none;
   const outcomeRound: string = latest.settledThroughRound;
+  const through = BigInt(outcomeRound);
+  const after = BigInt(latest.previousSettledThroughRound);
+  // Keep only records in this settled span. An unsettled newer round or a
+  // duplicated log must never stand in for the final round's work.
+  const records = new Map<bigint, bigint>();
+  for (const event of events) {
+    if (event.name !== "RoundRecorded" || !isDigits(event.args.roundId)) continue;
+    const round = BigInt(event.args.roundId);
+    if (round <= after || round > through) continue;
+    if (!isDigits(event.args.work)) return none;
+    const work = BigInt(event.args.work);
+    if (records.has(round) && records.get(round) !== work) return none;
+    records.set(round, work);
+  }
+  if (records.has(through))
+    return { outcome: classifyWork(records.get(through)!.toString()), outcomeRound };
+
   const previous = batches.find(
     (b: Json) => b.settledThroughRound === latest.previousSettledThroughRound,
   );
+  let batchWork: bigint | null = null;
   if (previous && isDigits(latest.cumulativeWork) && isDigits(previous.cumulativeWork)) {
-    const work = BigInt(latest.cumulativeWork) - BigInt(previous.cumulativeWork);
-    // A batch can settle several rounds at once, so it is rated by its work per round.
-    if (work >= 0n)
-      return { outcome: classifyWork((work / rounds).toString()), outcomeRound };
-    return none;
+    batchWork = BigInt(latest.cumulativeWork) - BigInt(previous.cumulativeWork);
+    if (batchWork < 0n) return none;
   }
-  return latest.activeRoundCount === "0"
-    ? { outcome: "Nap" as Activity, outcomeRound }
-    : none;
+  const workRecorded = [...records.values()].reduce((sum, work) => sum + work, 0n);
+  const activeRecorded = BigInt([...records.values()].filter((work) => work > 0n).length);
+  const active = isDigits(latest.activeRoundCount) ? BigInt(latest.activeRoundCount) : null;
+  if (batchWork !== null && workRecorded > batchWork) return none;
+  if (active !== null && (active > rounds || activeRecorded > active)) return none;
+  // A one-round delta is exact. A multi-round delta is never averaged.
+  if (rounds === 1n && batchWork !== null)
+    return { outcome: classifyWork(batchWork.toString()), outcomeRound };
+  // No final log is necessary if the settlement certifies zero work, or all
+  // work / active rounds have been accounted for before the final round.
+  if (
+    active === 0n || batchWork === 0n ||
+    (batchWork !== null && batchWork === workRecorded) ||
+    (active !== null && active === activeRecorded)
+  ) return { outcome: "Nap" as Activity, outcomeRound };
+  return none;
 }
 /**
  * Reads the feed from /core, the only response scoring depends on. /status is optional:

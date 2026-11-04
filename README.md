@@ -6,12 +6,12 @@ A mobile-first hamster penalty shootout built with Next.js App Router, TypeScrip
 
 ## Current status
 
-> **The source is ahead of `dist/`, and the new source has never been run.** The machine that made these changes could not run any command, so `dist/` was not rebuilt and no build, typecheck, test or browser check ran on the new code. See [VALIDATION.md](VALIDATION.md). The first job is to run the commands under [After launch](#after-launch).
+**The production export has been rebuilt from the current source and checked.** Build and typecheck passed, along with 60 unit tests, 18 Chromium interaction checks, and all 16 design-probe checks. See [VALIDATION.md](VALIDATION.md) for evidence and limits, including unavailable WebKit and real-account checks.
 
 | Feature | State |
 | --- | --- |
-| Squeekchain advantage (Zoomies, Nap, Jog) | In source, not in `dist/`, not yet run |
-| Reconnect, 30-second seat hold, walkover win | In source, not in `dist/`, not yet run |
+| Squeekchain advantage (Zoomies, Nap, Jog) | Active in `dist/`; Nap/Zoomies scoring and Unknown fallback verified in Chromium |
+| Reconnect, 30-second seat hold, walkover win | Included in `dist/`; server regressions pass, including disconnect during startup |
 | X login through Privy | Off until the owner sets a Privy app ID |
 | 1v1 rooms and quick match through PartyKit | Off until the owner deploys the server |
 | Public GitHub repository under `Thereisnodekunle` | Not created; this job has no access to that account |
@@ -22,10 +22,9 @@ While login and multiplayer are off, their controls say so and offer practice. T
 
 Only the owner can do these steps, because each needs the owner's own account. Nothing here moves money.
 
-1. **Rebuild and check.** Run `npm run build`, `npm run typecheck`, `npm test`, `npm run check:browser` and the design probe, fix anything they report, and commit the new `dist/`.
-2. **Set the Privy app ID.** It goes in `privyAppId` in `public/game-config.json`, or `NEXT_PUBLIC_PRIVY_APP_ID` on Vercel, as described in [Enable X login and shared matches](#enable-x-login-and-shared-matches).
-3. **Deploy the PartyKit server and set its address.** The address goes in `partyHost`, or `NEXT_PUBLIC_PARTYKIT_HOST` on Vercel.
-4. **Publish the repository.** Run these from a clean copy with your own GitHub login:
+1. **Set the Privy app ID.** It goes in `privyAppId` in `public/game-config.json`, or `NEXT_PUBLIC_PRIVY_APP_ID` on Vercel, as described in [Enable X login and shared matches](#enable-x-login-and-shared-matches).
+2. **Deploy the PartyKit server and set its address.** The address goes in `partyHost`, or `NEXT_PUBLIC_PARTYKIT_HOST` on Vercel.
+3. **Publish the repository.** Run these from a clean copy with your own GitHub login:
 
    ```sh
    gh repo create Thereisnodekunle/squeek-penalty --public --source=. --push
@@ -38,8 +37,8 @@ Only the owner can do these steps, because each needs the owner's own account. N
 | Privy app ID and PartyKit address were not supplied | Left `null` in `public/game-config.json`, with those features off | A made-up value would ship a login and lobby that fail. Both are one-line settings for the owner. |
 | Deploying PartyKit and pushing to GitHub | Not done; exact commands provided | Both need the owner's accounts, and this job has neither. |
 | How strong the advantage is | A 35% chance on eligible kicks | Strong enough to feel, without replacing the guessing game. A guaranteed effect would make diving center always correct on Nap. |
-| Which round sets the rules | The last settled batch, read at the start of each turn | Both players see the rule before choosing, and it cannot change mid-turn. |
-| A batch that settles several rounds at once | Rated by its average work per round | The earlier "Unknown" result would leave those batches with no effect on play. |
+| Which round sets the rules | The final settled round, read at the start of each turn | Both players see the rule before choosing, and it cannot change mid-turn. |
+| A batch that settles several rounds at once | Use its final `RoundRecorded` work, or a provable zero-work tail; otherwise Unknown | A batch average cannot establish the last round. Unknown uses normal rules. |
 | Who may connect to the server | `https://*.imd.site` by default | The final site address is assigned after this job. A valid Privy identity is still required to play. |
 
 ## Install, preview, rebuild
@@ -96,7 +95,7 @@ If both players pick lanes at random, the goal rate is about 78% on Zoomies, 67%
 
 The client sends a Privy identity token in the WebSocket's first message, not its URL. The room server verifies ES256, issuer, audience, expiry, and a signed Twitter linked account using Privy's app JWKS. It never trusts a client-provided handle or avatar. It rejects duplicate identities, a third player, late/repeated choices, oversized messages, invalid payloads, and excessive messages. Matchmaking pairs authenticated users; rematches require both players.
 
-If a player drops mid-match, the client retries for about 20 seconds and the server holds the seat for 30. The shot clock keeps running, a locked choice stays locked, and the other player sees a notice. A player who does not return loses by walkover. Match resumption across service restarts and a ranked leaderboard are not implemented.
+Both authenticated seats are reserved before the first feed request, so a disconnect while the match starts also gets the reconnect grace period. If a player drops mid-match, the client retries for about 20 seconds and the server holds the seat for 30. The shot clock keeps running, a locked choice stays locked, and the other player sees a notice. A player who does not return loses by walkover. Match resumption across service restarts and a ranked leaderboard are not implemented.
 
 References: [Privy OAuth](https://docs.privy.io/authentication/user-authentication/login-methods/oauth), [identity tokens](https://docs.privy.io/user-management/users/identity-tokens), [PartyKit server API](https://docs.partykit.io/reference/partyserver-api/).
 
@@ -110,27 +109,26 @@ The API can fail without stopping a match:
 - **`/v1/core` down for up to 10 minutes:** the last good round stays in effect.
 - **`/v1/core` down for longer:** the pitch shows "Live feed unavailable" and play uses normal rules.
 
-Rounds start at **1**, using the API's genesis timestamp, round duration, and observation timestamp, following the [official round definition](https://docs.squeekchain.com/system/rounds-and-blocks/). Last outcome comes from the newest `BatchSettled` event and the batch before it. A batch covering several rounds is rated by its work per round. Missing history displays `Unknown`, not a fabricated last outcome, and plays on normal rules.
+Rounds start at **1**, using the API's genesis timestamp, round duration, and observation timestamp, following the [official round definition](https://docs.squeekchain.com/system/rounds-and-blocks/). The newest `BatchSettled` sets the settled boundary. The parser uses that final round's `RoundRecorded.work` when present. For a single-round batch, the change from the preceding cumulative total is also exact. A zero-work settlement, or records accounting for all batch work or active rounds before the boundary, proves a Nap tail. Duplicated logs are counted once and newer unsettled records are ignored. Unexplained multi-round work displays `Unknown` and uses normal rules; no batch is averaged.
 
 Nap/Jog/Zoomies are **this game's own labels**, not additional official oracle attestations. Last settled-round work is Nap at zero, Jog from 1–299 work units, and Zoomies from 300; these set the [hamster advantage](#hamster-advantage). Current wheel speed is Nap at zero, Jog below 833 mm/s, and Zoomies at or above 833 mm/s; it only changes the sidebar and never affects scoring. Telemetry is a confirmation-delayed Sepolia view, not a settlement promise. The stream link under the pitch and in the sidebar opens Squeekchain's official site. This is a fan-made ecosystem game.
 
-The thresholds and the API response format come from the earlier job's fixtures. This job could not read the live API (its fetch tool received HTTP 403), so how often each outcome appears in real data is unconfirmed.
+The work thresholds are game rules. The live API fetch was unavailable during this revision's browser check; deterministic API fixtures verified settled-round parsing, scoring, and outage behavior. Live outcome frequency remains unconfirmed.
 
 ## Checks and delivery
 
-Build, typecheck, test, browser and design review results are recorded in [VALIDATION.md](VALIDATION.md). Those results describe the earlier revision that produced the committed `dist/`; none of them cover the current source. Design tokens and component behavior are documented in [DESIGN.md](DESIGN.md).
+Build, typecheck, test, browser and design review results are recorded in [VALIDATION.md](VALIDATION.md). The current revision's results cover the delivered source and rebuilt `dist/`. Design tokens and component behavior are documented in [DESIGN.md](DESIGN.md).
 
 ```sh
 npm run check:budget
-IMD_PLAYWRIGHT=/opt/imd-tools/playwright-mcp/node_modules/playwright/index.mjs \
-PLAYWRIGHT_BROWSERS_PATH=/opt/imd-tools/ms-playwright npm run check:browser
+IMD_PLAYWRIGHT=/path/to/playwright/index.mjs npm run check:browser
 ```
 
 The browser check manages and closes its own bounded preview server. On another workstation, set `IMD_PLAYWRIGHT` to an existing Playwright module and use that installation's browsers. No browser or dependency archive is included in the submission.
 
-On the earlier revision, the build and typecheck passed. The build reported a transitive viem/x402 dynamic-import warning inside Privy; practice had no observed runtime errors. The unneeded optional Farcaster Solana adapter is disabled in the webpack resolver. Privy is loaded only when a real app ID is configured; its complete required runtime chunks remain in the export.
+The current build and typecheck passed. The build reported transitive viem/x402 dynamic-import warnings inside Privy and a workspace-root warning from the isolated scratch build; the exported practice game had no observed runtime errors. The unneeded optional Farcaster Solana adapter is disabled in the webpack resolver. Privy is loaded only when a real app ID is configured; its complete required runtime chunks remain in the export.
 
-The review revision restores shared dialog centring and shows the live Squeekchain round and last outcome directly on the pitch during phone play. `npm run check:browser` now also checks all shared dialog layouts at 320×568, 390×844 and 1440×900, plus live/unknown/offline pitch captions without overlap. Feed fixtures exist only in the browser test. See the revision record in [VALIDATION.md](VALIDATION.md) and the two finding responses in [.imd-responses.json](.imd-responses.json).
+The review revision preserves shared dialog centring and pitch telemetry. `npm run check:browser` checks dialog layouts at 320×568, 390×844 and 1440×900, live/unknown/offline pitch captions, and actual Nap/Zoomies scoring in the production export. Controlled feeds and random rolls exist only in tests. All four review responses are in [.imd-responses.json](.imd-responses.json).
 
 The entire submission is checked against 8,388,608 bytes by `scripts/bundle-budget.mjs`. Source, lockfile, static export, local font, share image, and licenses are retained. No ignore file was changed, and no dependency/cache directory, registry mirror, archive, submodule, or source map is required.
 

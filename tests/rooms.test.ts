@@ -3,6 +3,67 @@ import assert from "node:assert/strict";
 import { generateKeyPair, SignJWT, type JWTVerifyGetKey } from "jose";
 import Server, { originAllowed } from "../party/server";
 import { identityFromClaims, verifySignedIdentity } from "../party/identity";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+
+// Exercise the actual hook's message handlers with isolated state and socket I/O.
+// No service credentials or fake-login paths are included in the application.
+test("private Q room codes stay visible while reserved quick-match codes stay hidden", async () => {
+  const source = readFileSync(new URL("../components/useOnlineMatch.ts", import.meta.url), "utf8");
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const slots: any[] = [];
+  let cursor = 0;
+  const react = {
+    useState(initial: any) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = initial;
+      return [slots[i], (value: any) => {
+        slots[i] = typeof value === "function" ? value(slots[i]) : value;
+      }];
+    },
+    useRef(initial: any) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = { current: initial };
+      return slots[i];
+    },
+    useCallback: (fn: any) => fn,
+    useEffect: () => {},
+  };
+  let socket: any;
+  class Socket {
+    onmessage: any;
+    constructor(readonly url: URL) { socket = this; }
+    close() {}
+    send() {}
+  }
+  const exports: any = {};
+  runInNewContext(outputText, {
+    exports,
+    require(name: string) { assert.equal(name, "react"); return react; },
+    URL, WebSocket: Socket,
+    setTimeout: () => 1, clearTimeout: () => {},
+    crypto: { getRandomValues(values: Uint8Array) { values.fill(0); values[0] = 14; return values; } },
+  });
+  function render() {
+    cursor = 0;
+    return exports.useOnlineMatch({ host: "https://rooms.test", token: "unit-test-token" });
+  }
+  await render().connect("create");
+  assert.equal(socket.url.pathname, "/parties/main/QAAAAA");
+  socket.onmessage({ data: JSON.stringify({ type: "waiting" }) });
+  assert.equal(render().state, "waiting");
+  assert.equal(render().roomCode, "QAAAAA");
+  await render().connect("quick");
+  socket.onmessage({ data: JSON.stringify({ type: "waiting" }) });
+  assert.equal(render().roomCode, null);
+  socket.onmessage({ data: JSON.stringify({ type: "matched", room: "QAAAAAAAAAA" }) });
+  assert.equal(socket.url.pathname, "/parties/main/QAAAAAAAAAA");
+  socket.onmessage({ data: JSON.stringify({ type: "waiting" }) });
+  assert.equal(render().roomCode, null);
+});
 
 const keys = generateKeyPair("ES256");
 const getKey: JWTVerifyGetKey = async () => (await keys).publicKey;
@@ -309,6 +370,70 @@ test("a host leaving before anyone joins closes the room", async () => {
   const b = await f.connect("b");
   await f.auth(b, "bob", "join");
   assert.ok(b.closed);
+});
+test("a disconnect while the first feed loads holds both seats and allows rejoining", async () => {
+  const f = fixture();
+  const a = await f.connect("a");
+  const b = await f.connect("b");
+  await f.auth(a, "alice");
+  let release!: (value: Record<string, any>) => void;
+  let started!: () => void;
+  const fetching = new Promise<void>((resolve) => { started = resolve; });
+  f.server.fetchCore = () => {
+    started();
+    return new Promise((resolve) => { release = resolve; });
+  };
+  const joining = f.auth(b, "bob", "join");
+  await fetching;
+  f.connections.delete(a.id);
+  await f.server.onClose(a);
+  release(settled("500"));
+  await joining;
+  assert.equal(f.server.players.length, 2, "both authenticated seats survive the pending start");
+  assert.equal(f.server.stage, "choosing");
+  const again = await f.connect("a2");
+  await f.auth(again, "alice", "rejoin");
+  assert.equal(again.messages.at(-1).playerIndex, 0);
+  assert.equal(f.server.graceTimers.size, 0);
+  await f.server.onAlarm();
+  assert.equal(f.server.match.kicks.length, 1);
+});
+test("an unknown Q-prefixed private room still rejects a join", async () => {
+  const f = fixture("QAAAAA");
+  const a = await f.connect("a");
+  await f.auth(a, "alice", "join");
+  assert.ok(a.closed);
+  assert.equal(f.server.players.length, 0);
+});
+test("a grace period expiring during startup cannot resurrect the match", async () => {
+  const f = fixture();
+  f.server.graceMs = 10;
+  const a = await f.connect("a");
+  const b = await f.connect("b");
+  await f.auth(a, "alice");
+  let release!: (value: Record<string, any>) => void;
+  let started!: () => void;
+  const fetching = new Promise<void>((resolve) => { started = resolve; });
+  f.server.fetchCore = () => {
+    started();
+    return new Promise((resolve) => { release = resolve; });
+  };
+  const joining = f.auth(b, "bob", "join");
+  await fetching;
+  assert.equal(f.server.stage, "starting");
+  assert.equal(a.messages.at(-1).turnReady, false);
+  await f.choose(b, "left");
+  assert.equal(f.server.choices.size, 0);
+  f.connections.delete(a.id);
+  await f.server.onClose(a);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  release(settled("500"));
+  await joining;
+  assert.equal(f.server.stage, "abandoned");
+  assert.equal(f.alarm(), null);
+  assert.equal(b.messages.at(-1).walkover, true);
+  await f.server.onAlarm();
+  assert.equal(f.server.match.kicks.length, 0);
 });
 test("leaving after the final whistle ends the room without a walkover", async () => {
   const f = await ready();

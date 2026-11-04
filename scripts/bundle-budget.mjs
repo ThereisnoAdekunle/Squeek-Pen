@@ -2,7 +2,9 @@ import { readdir, stat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 const limit = 8388608;
 const files = [];
-const omitted = new Set([".git", ".github", ".imd", "node_modules"]);
+// The managed browser/runtime writes an already-ignored .cache/ directory.
+// It is not part of the Git submission, just like disposable test scaffolding.
+const omitted = new Set([".git", ".github", ".imd", ".cache", "node_modules"]);
 async function walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (

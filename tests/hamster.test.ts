@@ -141,7 +141,7 @@ test("the outcome comes from the last settled round", () => {
   assert.equal(feed.outcomeRound, "1037");
   assert.equal(feed.current, "Zoomies");
 });
-test("a multi-round batch is rated by work per round", () => {
+test("unexplained multi-round work is Unknown, never a batch average", () => {
   const rated = (work: string) =>
     parseFeed(
       status,
@@ -149,8 +149,59 @@ test("a multi-round batch is rated by work per round", () => {
       now,
     ).outcome;
   assert.equal(rated("0"), "Nap");
-  assert.equal(rated("600"), "Jog");
-  assert.equal(rated("900"), "Zoomies");
+  assert.equal(rated("600"), null);
+  assert.equal(rated("900"), null);
+});
+const recorded = (round: string, work: string) => ({
+  eventName: "RoundRecorded",
+  arguments: [
+    { name: "roundId", value: round },
+    { name: "work", value: work },
+  ],
+});
+test("a zero-work tail after a busy round is Nap, never Zoomies", () => {
+  const feed = parseFeed(null, core([
+    event("102", "100", "600", "1"),
+    recorded("101", "600"),
+    event("100", "99", "0", "0"),
+  ]), now);
+  assert.equal(feed.outcome, "Nap");
+  assert.equal(feed.outcomeRound, "102");
+});
+test("the final RoundRecorded overrides a batch's average", () => {
+  for (const [work, outcome] of [["0", "Nap"], ["1", "Jog"], ["300", "Zoomies"]]) {
+    const feed = parseFeed(null, core([
+      recorded("102", work),
+      event("102", "100", "1000", "2"),
+      event("100", "99", "0", "0"),
+    ]), now);
+    assert.equal(feed.outcome, outcome);
+    assert.equal(feed.outcomeRound, "102");
+  }
+});
+test("a final record works without the preceding batch; newer unsettled records do not count", () => {
+  const feed = parseFeed(null, core([
+    recorded("103", "900"),
+    recorded("102", "120"),
+    event("102", "100", "600", "2"),
+  ]), now);
+  assert.equal(feed.outcome, "Jog");
+  assert.equal(feed.outcomeRound, "102");
+});
+test("a certified all-zero batch and accounted active rounds prove a Nap tail", () => {
+  assert.equal(parseFeed(null, core([event("102", "100", "600", "0")]), now).outcome, "Nap");
+  assert.equal(parseFeed(null, core([
+    event("102", "100", "600", "1"), recorded("101", "600"),
+  ]), now).outcome, "Nap");
+});
+test("incomplete, duplicate or unrelated records cannot invent a final outcome", () => {
+  const batch = [event("103", "100", "600", "2"), event("100", "99", "0", "0")];
+  for (const records of [
+    [recorded("101", "300")],
+    [recorded("101", "300"), recorded("101", "300")],
+    [recorded("99", "600"), recorded("104", "600")],
+    [recorded("103", "invalid")],
+  ]) assert.equal(parseFeed(null, core([...batch, ...records]), now).outcome, null);
 });
 test("a settled outcome survives a missing or stale /status", () => {
   const events = [event("1037", "1036", "100"), event("1036", "1035", "100")];

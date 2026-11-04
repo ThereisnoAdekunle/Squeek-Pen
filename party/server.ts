@@ -53,7 +53,7 @@ export default class Server implements Party.Server {
   match: Match = newMatch();
   choices = new Map<string, Direction>();
   queue = new Map<string, string>();
-  stage: "waiting" | "choosing" | "revealing" | "finished" | "abandoned" =
+  stage: "waiting" | "starting" | "choosing" | "revealing" | "finished" | "abandoned" =
     "waiting";
   deadline = 0;
   rematches = new Set<string>();
@@ -191,7 +191,7 @@ export default class Server implements Party.Server {
       if (
         this.players.length === 0 &&
         action === "join" &&
-        !this.room.id.startsWith("Q")
+        !/^Q[A-HJ-NP-Z2-9]{10}$/.test(this.room.id)
       )
         throw new Error("No match has that code. Check it with your friend.");
       if (this.players.length > 0 && action === "create")
@@ -231,6 +231,13 @@ export default class Server implements Party.Server {
     this.publish();
   }
   async startTurn() {
+    if (this.players.length !== 2 || this.stage === "abandoned") return;
+    // Reserve both seats before yielding to feed I/O. Publish now so a client
+    // dropping during startup knows it has a match and can rejoin that seat.
+    this.stage = "starting";
+    this.deadline = 0;
+    this.choices.clear();
+    this.publish();
     // The API can be slow or down. The turn opens on time either way, on the last good data.
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
@@ -240,7 +247,7 @@ export default class Server implements Party.Server {
       }),
     ]);
     clearTimeout(timer);
-    if ((this.stage as string) === "abandoned") return;
+    if ((this.stage as string) !== "starting" || this.players.length !== 2) return;
     const usable =
       this.feed && Date.now() - this.feed.receivedAt <= FEED_STALE_MS;
     // Fixed for the whole turn, so both players read the same rule before choosing.
@@ -278,7 +285,7 @@ export default class Server implements Party.Server {
     });
   }
   async settle() {
-    if (this.stage !== "choosing") return;
+    if (this.stage !== "choosing" || this.players.length !== 2) return;
     const kicker = this.players[this.match.kicker];
     const keeper = this.players[this.match.kicker === 0 ? 1 : 0];
     const shot = this.choices.get(kicker.id) || randomDirection();
