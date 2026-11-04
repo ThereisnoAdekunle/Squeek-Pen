@@ -289,6 +289,8 @@ try {
     viewport: { width: 390, height: 844 },
     reducedMotion: "reduce",
   });
+  // Scripted scores need normal rules; a live hamster advantage would change them.
+  await gameContext.route("https://api.squeekchain.com/**", (route) => route.abort());
   await gameContext.addInitScript(() => {
     Crypto.prototype.getRandomValues = function (array) {
       array.fill(0);

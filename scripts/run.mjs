@@ -16,6 +16,7 @@ const inputs = [
   "lib",
   "public",
   "party",
+  "rules",
   "tests",
   "package.json",
   "package-lock.json",
@@ -75,6 +76,7 @@ if (action === "build") {
     "tests/game.test.ts",
     "tests/rooms.test.ts",
     "tests/activity.test.ts",
+    "tests/hamster.test.ts",
   ]);
 } else if (action === "dev") {
   await run("node", ["node_modules/next/dist/bin/next", "dev", "--webpack"]);

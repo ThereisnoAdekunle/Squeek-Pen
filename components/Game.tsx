@@ -23,6 +23,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  Moon,
   Radio,
   RotateCcw,
   Shield,
@@ -46,13 +47,22 @@ import {
   isSuddenDeath,
   newMatch,
   randomDirection,
-  resolveKick,
   shootoutRound,
   type Direction,
   type Match,
 } from "@/lib/game";
-import { parseActivity, type LiveActivity } from "@/lib/activity";
+import type { Activity } from "@/lib/activity";
 import { sound, unlockAudio } from "@/lib/sound";
+import {
+  FEED_STALE_MS,
+  flightMs,
+  hamsterRule,
+  parseFeed,
+  resolveHamsterKick,
+  type HamsterFeed,
+  type HamsterKick,
+  type Twist,
+} from "@/rules/hamster";
 import { useOnlineMatch } from "./useOnlineMatch";
 
 const PrivyAuth = dynamic(() => import("./PrivyAuth"), { ssr: false });
@@ -126,7 +136,10 @@ export default function Game() {
   const [shot, setShot] = useState<Direction | null>(null);
   const [dive, setDive] = useState<Direction | null>(null);
   const [goal, setGoal] = useState<boolean | null>(null);
-  const [live, setLive] = useState<LiveActivity | null>(null);
+  const [twist, setTwist] = useState<Twist | null>(null);
+  const [turnHamster, setTurnHamster] = useState<Activity | null>(null);
+  const [revealTick, setRevealTick] = useState(0);
+  const [live, setLive] = useState<HamsterFeed | null>(null);
   const [feedState, setFeedState] = useState<"loading" | "live" | "offline">(
     "loading",
   );
@@ -143,6 +156,10 @@ export default function Game() {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const soundRef = useRef(soundOn);
   const recordedMatch = useRef(false);
+  const revealing = useRef(false);
+  const lastGoodFeed = useRef<HamsterFeed | null>(null);
+  const turnHamsterRef = useRef<Activity | null>(null);
+  const feedHamsterRef = useRef<Activity | null>(null);
   const online = useOnlineMatch({ host: config.partyHost, token: auth.token });
   const onlineActive = online.state !== "idle";
   const me = online.playerIndex ?? 0;
@@ -152,11 +169,19 @@ export default function Game() {
       ? match.kicks.at(-1)!.kicker
       : match.kicker;
   const role = activeKicker === (onlineActive ? me : 0) ? "kick" : "save";
-  const opponent = onlineActive
-    ? online.players.find((p) => p.id !== auth.id)
-    : null;
-  const opponentHandle = opponent?.handle || "Nibbles";
+  const self = onlineActive ? online.players[me] : null;
+  const opponent = onlineActive ? online.players[me === 0 ? 1 : 0] : null;
+  const opponentHandle = opponent?.handle || (onlineActive ? "Rival" : "Nibbles");
   const activity = feedState === "live" ? live?.current || null : null;
+  const feedHamster = feedState === "live" ? live?.outcome || null : null;
+  const inTurn = phase !== "idle" && phase !== "finished";
+  // The rule shown during a turn is the one locked for it, in practice and online.
+  const hamster = onlineActive
+    ? online.hamster
+    : inTurn
+      ? turnHamster
+      : feedHamster;
+  const rule = hamsterRule(hamster);
   const transition = useCallback((p: Phase) => {
     phaseRef.current = p;
     setPhase(p);
@@ -174,6 +199,21 @@ export default function Game() {
   useEffect(() => {
     soundRef.current = soundOn;
   }, [soundOn]);
+  useEffect(() => {
+    feedHamsterRef.current = feedHamster;
+  }, [feedHamster]);
+  // OAuth on a phone can reload the page, so the mode picked before login survives in storage.
+  useEffect(() => {
+    if (!auth.authenticated) return;
+    try {
+      const pending = sessionStorage.getItem("squeek-after-login");
+      sessionStorage.removeItem("squeek-after-login");
+      if (pending === "friend" || pending === "quick") {
+        setMode(pending);
+        setDialog("online");
+      }
+    } catch {}
+  }, [auth.authenticated]);
   useEffect(() => () => clearTimers(), [clearTimers]);
   useEffect(() => {
     fetch("./game-config.json")
@@ -182,16 +222,17 @@ export default function Game() {
         return r.json();
       })
       .then((c) => {
-        if (typeof c.privyAppId === "string" && c.privyAppId)
-          setAuth({ ...guestAuth, ready: false });
-        setConfig({
-          privyAppId:
-            typeof c.privyAppId === "string" && c.privyAppId
-              ? c.privyAppId
-              : null,
-          partyHost:
-            typeof c.partyHost === "string" && c.partyHost ? c.partyHost : null,
-        });
+        // Build-time values, as set in a Vercel project, take priority over the file.
+        const privyAppId =
+          process.env.NEXT_PUBLIC_PRIVY_APP_ID ||
+          (typeof c.privyAppId === "string" && c.privyAppId) ||
+          null;
+        const partyHost =
+          process.env.NEXT_PUBLIC_PARTYKIT_HOST ||
+          (typeof c.partyHost === "string" && c.partyHost) ||
+          null;
+        if (privyAppId) setAuth({ ...guestAuth, ready: false });
+        setConfig({ privyAppId, partyHost });
       })
       .catch(() => {});
     try {
@@ -219,7 +260,7 @@ export default function Game() {
       controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 7000);
       try {
-        const [a, b] = await Promise.all(
+        const [statusResult, coreResult] = await Promise.allSettled(
           ["status", "core"].map(async (p) => {
             const r = await fetch(`https://api.squeekchain.com/v1/${p}`, {
               signal: controller.signal,
@@ -229,13 +270,24 @@ export default function Game() {
             return r.json();
           }),
         );
-        const data = parseActivity(a, b);
+        if (coreResult.status === "rejected") throw new Error();
+        const data = parseFeed(
+          statusResult.status === "fulfilled" ? statusResult.value : null,
+          coreResult.value,
+        );
+        lastGoodFeed.current = data;
         if (!disposed) {
           setLive(data);
           setFeedState("live");
         }
       } catch {
-        if (!disposed) setFeedState("offline");
+        // A short outage keeps the last good round. After that, play falls back to normal rules.
+        const good = lastGoodFeed.current;
+        if (
+          !disposed &&
+          (!good || Date.now() - good.receivedAt > FEED_STALE_MS)
+        )
+          setFeedState("offline");
       } finally {
         pending = false;
         clearTimeout(timeout);
@@ -258,20 +310,29 @@ export default function Game() {
       setShot(null);
       setDive(null);
       setGoal(null);
+      setTwist(null);
+      // Read once per turn, so the rule cannot change after the player has chosen.
+      const turnRule = feedHamsterRef.current;
+      turnHamsterRef.current = turnRule;
+      setTurnHamster(turnRule);
       aiChoice.current = randomDirection();
       deadline.current = Date.now() + 10000;
       setTimeLeft(10);
       transition("choose");
+      const active = hamsterRule(turnRule);
       setAnnouncement(
-        next.kicker === 0
-          ? "Your shot. Choose left, center, or right."
-          : "Your turn in goal. Choose where to dive.",
+        `${
+          next.kicker === 0
+            ? "Your shot. Choose left, center, or right."
+            : "Your turn in goal. Choose where to dive."
+        }${active.active ? ` ${active.title}.` : ""}`,
       );
     },
     [transition],
   );
   const startPractice = useCallback(() => {
     clearTimers();
+    revealing.current = false;
     online.leave();
     setMode("practice");
     setDialog(null);
@@ -294,13 +355,15 @@ export default function Game() {
   }
   const animateKick = useCallback(
     (next: Match) => {
-      const kick = next.kicks.at(-1)!;
+      const kick = next.kicks.at(-1)! as HamsterKick;
+      revealing.current = true;
       setShot(kick.shot);
       setDive(kick.dive);
       setGoal(kick.goal);
+      setTwist(kick.twist ?? null);
       transition("runup");
       const dramatic = isMatchPoint(matchRef.current);
-      const speed = dramatic ? 1300 : activity === "Zoomies" ? 650 : 850;
+      const speed = flightMs(kick.hamster ?? null, dramatic);
       later(() => {
         transition("flight");
         sound("kick", soundRef.current);
@@ -311,24 +374,26 @@ export default function Game() {
         matchRef.current = next;
         sound(kick.goal ? "goal" : "save", soundRef.current);
         setAnnouncement(
-          `${kick.goal ? "Goal" : "Saved"}. ${kick.kicker === 0 ? playerHandle : opponentHandle} ${next.score[kick.kicker]}. Score ${next.score[me]} to ${next.score[me === 0 ? 1 : 0]}.`,
+          `${kick.twist === "too-fast" ? "Too fast. Goal" : kick.twist === "long-reach" ? "Long-reach save" : kick.goal ? "Goal" : "Saved"}. ${kick.kicker === me ? playerHandle : opponentHandle} ${next.score[kick.kicker]}. Score ${next.score[me]} to ${next.score[me === 0 ? 1 : 0]}.`,
         );
       }, 500 + speed);
       later(
         () => {
+          revealing.current = false;
           if (next.winner !== null) {
             transition("finished");
             sound("win", soundRef.current);
           } else if (!onlineActive) beginTurn(next);
           else {
             transition("locked");
+            // If the next turn arrived during this reveal, it opens now.
+            setRevealTick((tick) => tick + 1);
           }
         },
         500 + speed + 1300,
       );
     },
     [
-      activity,
       beginTurn,
       later,
       me,
@@ -354,12 +419,11 @@ export default function Game() {
       let defend = current.kicker === 0 ? aiChoice.current : direction;
       if (timedOut && current.kicker === 1)
         defend = directions[(directions.indexOf(shoot) + 1) % 3];
-      const next = resolveKick(
-        current,
-        shoot,
-        defend,
-        timedOut && current.kicker === 0,
-      );
+      const next = resolveHamsterKick(current, shoot, defend, {
+        timedOut: timedOut && current.kicker === 0,
+        keeperTimedOut: timedOut && current.kicker === 1,
+        hamster: turnHamsterRef.current,
+      });
       animateKick(next);
     },
     [animateKick, onlineActive, online.choose, transition],
@@ -441,7 +505,7 @@ export default function Game() {
     if (next.kicks.length > onlineKickCount.current) {
       onlineKickCount.current = next.kicks.length;
       animateKick(next);
-    } else if (online.turnReady && next.winner === null) {
+    } else if (online.turnReady && next.winner === null && !revealing.current) {
       if (next.kicks.length === 0) recordedMatch.current = false;
       onlineKickCount.current = next.kicks.length;
       setMatch(next);
@@ -449,10 +513,14 @@ export default function Game() {
       setShot(null);
       setDive(null);
       setGoal(null);
+      setTwist(null);
       deadline.current = online.deadline;
-      transition("choose");
+      // Back from a dropped connection, a locked choice stays locked.
+      transition(online.youLocked ? "locked" : "choose");
       setDialog(null);
-      setTimeLeft(10);
+      setTimeLeft(
+        Math.max(0, Math.ceil((online.deadline - Date.now()) / 1000)),
+      );
     }
   }, [
     online.match,
@@ -460,6 +528,8 @@ export default function Game() {
     onlineActive,
     online.deadline,
     online.turnReady,
+    online.youLocked,
+    revealTick,
   ]);
   useEffect(() => {
     if (!onlineActive || phase !== "choose") return;
@@ -474,6 +544,7 @@ export default function Game() {
   }, [onlineActive, phase, online.deadline]);
   function goHome() {
     clearTimers();
+    revealing.current = false;
     online.leave();
     setMode("practice");
     setMatch(newMatch());
@@ -483,6 +554,7 @@ export default function Game() {
     setShot(null);
     setDive(null);
     setGoal(null);
+    setTwist(null);
     onlineKickCount.current = 0;
   }
   function toggleSound() {
@@ -495,8 +567,17 @@ export default function Game() {
     if (next) sound("kick", true);
   }
   function login() {
-    if (config.privyAppId) auth.login();
-    else setDialog("login");
+    if (!config.privyAppId) {
+      setDialog("login");
+      return;
+    }
+    try {
+      if (mode !== "practice")
+        sessionStorage.setItem("squeek-after-login", mode);
+    } catch {}
+    // A native dialog sits in the top layer and would cover Privy's login window.
+    setDialog(null);
+    auth.login();
   }
   function pickMode(next: Mode) {
     if (phase !== "idle" && phase !== "finished") {
@@ -510,7 +591,8 @@ export default function Game() {
     const url = new URL(window.location.href);
     url.hash = "";
     url.search = "";
-    const text = `${match.winner === me ? "Tiny paws. Massive W." : "I demand a rematch."} ${match.score[me]}–${match.score[me === 0 ? 1 : 0]} in SQUEEK PENALTY${onlineActive ? "" : " practice"}. Think you can beat the hamster? @squeekchain`;
+    const rival = onlineActive && opponent ? ` vs ${opponent.handle}` : "";
+    const text = `${match.winner === me ? "Tiny paws. Massive W." : "I demand a rematch."} ${match.score[me]}–${match.score[me === 0 ? 1 : 0]}${rival} in SQUEEK PENALTY${onlineActive ? "" : " practice"}. Think you can beat the hamster? @squeekchain`;
     window.open(
       `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url.href)}`,
       "_blank",
@@ -538,6 +620,7 @@ export default function Game() {
     }
     onlineKickCount.current = 0;
     recordedMatch.current = false;
+    revealing.current = false;
     clearTimers();
     transition("idle");
     await online.connect(
@@ -650,7 +733,7 @@ export default function Game() {
             <div className="scene">
               <div className="scoreboard">
                 <div className="player player-you">
-                  <Avatar avatar={auth.avatar} />
+                  <Avatar avatar={self?.avatar ?? auth.avatar} />
                   <div>
                     <strong>{playerHandle}</strong>
                     <span>{onlineActive ? "Player" : "The challenger"}</span>
@@ -683,10 +766,11 @@ export default function Game() {
                 shot={shot}
                 dive={dive}
                 goal={goal}
-                activity={activity}
+                activity={hamster}
                 matchPoint={phase !== "idle" && isMatchPoint(match)}
                 role={role}
                 timedOut={phase === "result" && !!match.kicks.at(-1)?.timedOut}
+                twist={twist}
               />
               <div className="pitch-corner">
                 <span
@@ -742,6 +826,7 @@ export default function Game() {
                   <div className="winner-actions">
                     <button
                       className="primary-button"
+                      disabled={onlineActive && online.state !== "playing"}
                       onClick={() =>
                         onlineActive ? online.rematch() : startPractice()
                       }
@@ -761,6 +846,29 @@ export default function Game() {
                   </button>
                 </div>
               )}
+            </div>
+            <div
+              className={`hamster-bar ${hamster === "Zoomies" ? "is-kicker" : hamster === "Nap" ? "is-keeper" : ""}`}
+            >
+              <span className="hamster-rule">
+                {hamster === "Zoomies" ? (
+                  <Zap size={16} />
+                ) : hamster === "Nap" ? (
+                  <Moon size={16} />
+                ) : (
+                  <Radio size={16} />
+                )}
+                {rule.title}
+              </span>
+              <a
+                href="https://squeekchain.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="hamster-watch"
+              >
+                Watch live
+                <ArrowUpRight size={14} />
+              </a>
             </div>
             <div className="game-controls">
               {phase === "idle" ? (
@@ -843,9 +951,11 @@ export default function Game() {
                     {phase === "locked"
                       ? "Waiting for your opponent. Your choice stays secret."
                       : phase === "choose"
-                        ? role === "kick"
-                          ? "Outsmart the keeper. Different directions = goal."
-                          : "Read the shot. Match their direction to save."
+                        ? rule.active
+                          ? rule.detail
+                          : role === "kick"
+                            ? "Outsmart the keeper. Different directions = goal."
+                            : "Read the shot. Match their direction to save."
                         : "Both choices are locked. Let the paws do the talking."}
                   </p>
                 </div>
@@ -991,16 +1101,14 @@ export default function Game() {
                           ? "Nap time"
                           : activity === "Zoomies"
                             ? "Full zoomies"
-                            : "On a little jog"}
+                            : activity === "Jog"
+                              ? "On a little jog"
+                              : "Wheel speed unavailable"}
                   </h2>
                   <p>
-                    {feedState === "live"
-                      ? activity === "Nap"
-                        ? "A sleepy keeper with the same fair odds."
-                        : activity === "Zoomies"
-                          ? "Sparkles and extra speedy little paws."
-                          : "Classic kicks with a happy hamster."
-                      : "Practice is always ready."}
+                    {feedState === "offline"
+                      ? "Normal rules until the feed is back."
+                      : rule.detail}
                   </p>
                 </div>
               </div>
@@ -1177,6 +1285,11 @@ export default function Game() {
             <p className="tutorial-timer">
               <Clock3 size={16} />
               10 seconds to choose. A missed choice forfeits your turn.
+            </p>
+            <p className="tutorial-timer">
+              <Zap size={16} />
+              The last settled Squeekchain round sets the rules. Zoomies helps
+              the kicker, Nap helps the keeper, Jog is normal.
             </p>
             <button
               className="primary-button full-width"
@@ -1413,6 +1526,17 @@ export default function Game() {
           <button className="secondary-button" onClick={goHome}>
             Back to arena
           </button>
+        </div>
+      )}
+      {(online.state === "reconnecting" ||
+        (online.state === "playing" && online.opponentAway)) && (
+        <div className="connection-banner is-info" role="status">
+          <LoaderCircle className="spinner" size={18} />
+          <span>
+            {online.state === "reconnecting"
+              ? "Connection dropped. Getting you back on the pitch…"
+              : `${opponentHandle} dropped out. Holding their spot for 30 seconds.`}
+          </span>
         </div>
       )}
     </div>

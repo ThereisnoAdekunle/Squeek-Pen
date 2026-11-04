@@ -4,11 +4,21 @@ import {
   isDirection,
   newMatch,
   randomDirection,
-  resolveKick,
   type Direction,
   type Match,
 } from "../lib/game";
+import type { Activity } from "../lib/activity";
+import {
+  FEED_STALE_MS,
+  parseFeed,
+  resolveHamsterKick,
+  type HamsterFeed,
+} from "../rules/hamster";
 import { verifyIdentity, type Identity } from "./identity";
+
+const CORE_URL = "https://api.squeekchain.com/v1/core";
+const FEED_REFRESH_MS = 30000;
+const FEED_WAIT_MS = 1200;
 
 type ConnectionState = {
   identity?: Identity;
@@ -18,6 +28,25 @@ type ConnectionState = {
   authenticating?: boolean;
 };
 type Player = Identity & { connectionId: string };
+
+/** ALLOWED_ORIGIN is a comma-separated list. `https://*.example.com` matches subdomains. */
+export function originAllowed(allowed: unknown, origin: string | null) {
+  if (typeof allowed !== "string" || !origin) return false;
+  return allowed
+    .split(",")
+    .map((rule) => rule.trim())
+    .filter(Boolean)
+    .some((rule) => {
+      if (rule === origin) return true;
+      const wildcard = /^(https?:\/\/)\*(\.[^/]+)$/.exec(rule);
+      if (!wildcard) return false;
+      const [, scheme, suffix] = wildcard;
+      if (!origin.startsWith(scheme) || !origin.endsWith(suffix)) return false;
+      const host = origin.slice(scheme.length, -suffix.length);
+      return /^[a-z0-9.-]+$/i.test(host);
+    });
+}
+
 export default class Server implements Party.Server {
   constructor(readonly room: Party.Room) {}
   players: Player[] = [];
@@ -29,14 +58,42 @@ export default class Server implements Party.Server {
   deadline = 0;
   rematches = new Set<string>();
   authTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** How long a dropped player can rejoin before the other player wins by walkover. */
+  graceMs = 30000;
+  graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  feed: HamsterFeed | null = null;
+  feedCheckedAt = 0;
+  turnHamster: Activity | null = null;
   verifyToken(token: string, appId: string) {
     return verifyIdentity(token, appId);
   }
+  async fetchCore(): Promise<Record<string, any>> {
+    const response = await fetch(CORE_URL, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) throw new Error("Feed unavailable");
+    return (await response.json()) as Record<string, any>;
+  }
+  /** Undefined draws a secure random roll. Tests override this to pin a result. */
+  nextRoll(): number | undefined {
+    return undefined;
+  }
+  async refreshFeed() {
+    if (Date.now() - this.feedCheckedAt < FEED_REFRESH_MS) return;
+    this.feedCheckedAt = Date.now();
+    try {
+      this.feed = parseFeed(null, await this.fetchCore());
+    } catch {
+      if (this.feed && Date.now() - this.feed.receivedAt > FEED_STALE_MS)
+        this.feed = null;
+    }
+  }
   async onConnect(connection: Party.Connection, ctx: Party.ConnectionContext) {
-    const origin = this.room.env.ALLOWED_ORIGIN;
     if (
-      typeof origin !== "string" ||
-      ctx.request.headers.get("origin") !== origin
+      !originAllowed(
+        this.room.env.ALLOWED_ORIGIN,
+        ctx.request.headers.get("origin"),
+      )
     ) {
       connection.close(4003, "This origin is not enabled.");
       return;
@@ -58,6 +115,11 @@ export default class Server implements Party.Server {
   sendError(connection: Party.Connection, message: string, fatal = false) {
     connection.send(JSON.stringify({ type: "error", message, fatal }));
     if (fatal) connection.close(4001, message);
+  }
+  sendOthers(playerId: string, message: Record<string, unknown>) {
+    for (const p of this.players)
+      if (p.id !== playerId)
+        this.room.getConnection(p.connectionId)?.send(JSON.stringify(message));
   }
   async authenticate(
     connection: Party.Connection,
@@ -118,6 +180,10 @@ export default class Server implements Party.Server {
         !/^Q[A-HJ-NP-Z2-9]{10}$/.test(this.room.id)
       )
         throw new Error("That room code is not valid.");
+      if (action === "rejoin") {
+        this.rejoin(connection, identity);
+        return;
+      }
       if (this.stage === "abandoned" || this.players.length >= 2)
         throw new Error("This room is full or has ended. Create a new room.");
       if (this.players.some((p) => p.id === identity.id))
@@ -148,7 +214,37 @@ export default class Server implements Party.Server {
       );
     }
   }
+  rejoin(connection: Party.Connection, identity: Identity) {
+    const seat = this.players.find((p) => p.id === identity.id);
+    if (!seat || this.stage === "waiting" || this.stage === "abandoned")
+      throw new Error("That match has ended. Head back to the arena.");
+    const previous = seat.connectionId;
+    seat.connectionId = connection.id;
+    seat.expiresAt = identity.expiresAt;
+    clearTimeout(this.graceTimers.get(seat.id));
+    this.graceTimers.delete(seat.id);
+    if (previous && previous !== connection.id)
+      this.room
+        .getConnection(previous)
+        ?.close(4002, "A newer connection replaced this one.");
+    this.sendOthers(seat.id, { type: "opponent-back" });
+    this.publish();
+  }
   async startTurn() {
+    // The API can be slow or down. The turn opens on time either way, on the last good data.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.refreshFeed(),
+      new Promise((accept) => {
+        timer = setTimeout(accept, FEED_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if ((this.stage as string) === "abandoned") return;
+    const usable =
+      this.feed && Date.now() - this.feed.receivedAt <= FEED_STALE_MS;
+    // Fixed for the whole turn, so both players read the same rule before choosing.
+    this.turnHamster = usable ? this.feed!.outcome : null;
     this.stage = "choosing";
     this.choices.clear();
     this.deadline = Date.now() + 10000;
@@ -161,20 +257,24 @@ export default class Server implements Party.Server {
       handle,
       avatar,
     }));
+    const usable =
+      this.feed && Date.now() - this.feed.receivedAt <= FEED_STALE_MS;
     this.players.forEach((p, index) => {
-      this.room
-        .getConnection(p.connectionId)
-        ?.send(
-          JSON.stringify({
-            type: "state",
-            match: this.match,
-            players,
-            playerIndex: index,
-            deadline: this.deadline,
-            turnReady: this.stage === "choosing",
-            rematchWaiting: this.rematches.has(p.id),
-          }),
-        );
+      this.room.getConnection(p.connectionId)?.send(
+        JSON.stringify({
+          type: "state",
+          match: this.match,
+          players,
+          playerIndex: index,
+          deadline: this.deadline,
+          remainingMs: Math.max(0, this.deadline - Date.now()),
+          turnReady: this.stage === "choosing",
+          youLocked: this.choices.has(p.id),
+          rematchWaiting: this.rematches.has(p.id),
+          hamster: this.turnHamster,
+          hamsterRound: usable ? this.feed!.outcomeRound : null,
+        }),
+      );
     });
   }
   async settle() {
@@ -185,12 +285,13 @@ export default class Server implements Party.Server {
     const dive =
       this.choices.get(keeper.id) ||
       directions[(directions.indexOf(shot) + 1) % 3];
-    this.match = resolveKick(
-      this.match,
-      shot,
-      dive,
-      !this.choices.has(kicker.id),
-    );
+    // The roll is drawn here, after both choices are held, and only the result is sent.
+    this.match = resolveHamsterKick(this.match, shot, dive, {
+      timedOut: !this.choices.has(kicker.id),
+      keeperTimedOut: !this.choices.has(keeper.id),
+      hamster: this.turnHamster,
+      roll: this.nextRoll(),
+    });
     this.stage = this.match.winner === null ? "revealing" : "finished";
     this.deadline = Date.now() + 14000;
     if (this.stage === "revealing")
@@ -229,7 +330,7 @@ export default class Server implements Party.Server {
     }
     if (
       data.type === "authenticate" &&
-      !["create", "join", "quick"].includes(data.action)
+      !["create", "join", "quick", "rejoin"].includes(data.action)
     ) {
       this.sendError(connection, "Choose a valid match mode.", true);
       return;
@@ -280,6 +381,13 @@ export default class Server implements Party.Server {
     if (this.stage === "revealing") await this.startTurn();
     else if (this.stage === "choosing") await this.settle();
   }
+  async endRoom(leaverId: string, walkover: boolean) {
+    this.stage = "abandoned";
+    await this.room.storage.deleteAlarm();
+    for (const timer of this.graceTimers.values()) clearTimeout(timer);
+    this.graceTimers.clear();
+    this.sendOthers(leaverId, { type: "opponent-left", walkover });
+  }
   async onClose(connection: Party.Connection) {
     clearTimeout(this.authTimers.get(connection.id));
     this.authTimers.delete(connection.id);
@@ -292,15 +400,30 @@ export default class Server implements Party.Server {
         this.queue.delete(state.identity.id);
       return;
     }
-    if (this.players.some((p) => p.connectionId === connection.id)) {
-      this.stage = "abandoned";
-      await this.room.storage.deleteAlarm();
-      for (const p of this.players) {
-        if (p.connectionId !== connection.id)
-          this.room
-            .getConnection(p.connectionId)
-            ?.send(JSON.stringify({ type: "opponent-left" }));
-      }
+    const seat = this.players.find((p) => p.connectionId === connection.id);
+    if (!seat || this.stage === "abandoned") return;
+    if (this.stage === "waiting") {
+      // Nobody has joined yet, so the room simply closes with its host.
+      this.players = this.players.filter((p) => p !== seat);
+      return;
     }
+    if (this.stage === "finished") {
+      await this.endRoom(seat.id, false);
+      return;
+    }
+    // Mid-match: the shot clock keeps running and the seat is held for the grace period.
+    seat.connectionId = "";
+    this.sendOthers(seat.id, {
+      type: "opponent-disconnected",
+      graceMs: this.graceMs,
+    });
+    this.graceTimers.set(
+      seat.id,
+      setTimeout(() => {
+        this.graceTimers.delete(seat.id);
+        if (seat.connectionId === "" && this.stage !== "abandoned")
+          void this.endRoom(seat.id, this.match.winner === null);
+      }, this.graceMs),
+    );
   }
 }

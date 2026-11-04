@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import Hamster from "./Hamster";
 import type { Direction } from "@/lib/game";
 import type { Activity } from "@/lib/activity";
+import { flightMs, type Twist } from "@/rules/hamster";
 
 export function Football({ className = "" }: { className?: string }) {
   return (
@@ -36,6 +37,7 @@ export default function Pitch({
   matchPoint,
   role,
   timedOut,
+  twist,
 }: {
   phase: string;
   shot: Direction | null;
@@ -45,23 +47,33 @@ export default function Pitch({
   matchPoint: boolean;
   role: "kick" | "save";
   timedOut: boolean;
+  twist: Twist | null;
 }) {
   const reveal =
     phase === "flight" || phase === "result" || phase === "finished";
+  const laneX = (lane: Direction | null) =>
+    lane === "left" ? -140 : lane === "right" ? 140 : 0;
+  // A long-reach save stretches most of the way across to the ball.
+  const keeperX =
+    twist === "long-reach"
+      ? Math.round(laneX(dive) * 0.35 + laneX(shot) * 0.65)
+      : laneX(dive);
   const style = {
     "--shot-x": shot === "left" ? "-145px" : shot === "right" ? "145px" : "0px",
-    "--dive-x": dive === "left" ? "-140px" : dive === "right" ? "140px" : "0px",
+    "--dive-x": `${keeperX}px`,
     "--dive-rot":
       dive === "left" ? "-58deg" : dive === "right" ? "58deg" : "0deg",
-    "--flight-time": matchPoint
-      ? "1300ms"
-      : activity === "Zoomies"
-        ? "650ms"
-        : "850ms",
+    "--flight-time": `${flightMs(activity, matchPoint)}ms`,
   } as CSSProperties;
+  const advantage =
+    activity === "Zoomies"
+      ? "advantage-kicker"
+      : activity === "Nap"
+        ? "advantage-keeper"
+        : "";
   return (
     <div
-      className={`pitch ${reveal ? "revealing" : ""} ${phase === "runup" ? "runup" : ""} ${phase === "result" && goal ? "goal-shake" : ""} ${matchPoint ? "dramatic" : ""} activity-${activity?.toLowerCase() || "unknown"}`}
+      className={`pitch ${advantage} ${reveal ? "revealing" : ""} ${phase === "runup" ? "runup" : ""} ${phase === "result" && goal ? "goal-shake" : ""} ${matchPoint ? "dramatic" : ""} activity-${activity?.toLowerCase() || "unknown"}`}
       style={style}
     >
       <svg
@@ -295,22 +307,9 @@ export default function Pitch({
         </foreignObject>
         {phase === "result" && !goal && (
           <g className="dust" fill="#c0b79c" opacity=".6">
-            <ellipse
-              cx={400 + (dive === "left" ? -140 : dive === "right" ? 140 : 0)}
-              cy="307"
-              rx="42"
-              ry="12"
-            />
-            <circle
-              cx={375 + (dive === "left" ? -140 : dive === "right" ? 140 : 0)}
-              cy="296"
-              r="13"
-            />
-            <circle
-              cx={419 + (dive === "left" ? -140 : dive === "right" ? 140 : 0)}
-              cy="299"
-              r="10"
-            />
+            <ellipse cx={400 + keeperX} cy="307" rx="42" ry="12" />
+            <circle cx={375 + keeperX} cy="296" r="13" />
+            <circle cx={419 + keeperX} cy="299" r="10" />
           </g>
         )}
         <path
@@ -339,14 +338,26 @@ export default function Pitch({
       {phase === "result" && (
         <div className={`result-callout ${goal ? "scored" : "saved"}`}>
           <strong>
-            {timedOut ? "Time’s up" : goal ? "Goooal!" : "What a save!"}
+            {timedOut
+              ? "Time’s up"
+              : twist === "too-fast"
+                ? "Too fast!"
+                : twist === "long-reach"
+                  ? "Long reach!"
+                  : goal
+                    ? "Goooal!"
+                    : "What a save!"}
           </strong>
           <span>
             {timedOut
               ? "The shot clock wins this one."
-              : shot === dive
-                ? "Great minds. Same direction."
-                : "Sent the keeper the wrong way."}
+              : twist === "too-fast"
+                ? "Zoomies ball. The keeper read it and still got beat."
+                : twist === "long-reach"
+                  ? "Nap-slowed ball. The keeper stretched a lane over."
+                  : shot === dive
+                    ? "Great minds. Same direction."
+                    : "Sent the keeper the wrong way."}
           </span>
         </div>
       )}

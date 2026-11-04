@@ -1,5 +1,55 @@
 # SQUEEK PENALTY validation
 
+## Hamster advantage and multiplayer revision, 2026-11-04: not run
+
+**No check ran on this revision, and `dist/` was not rebuilt.** Every result further down this file describes the earlier revision.
+
+The shell could not start in this job. Every command, including `true`, returned:
+
+> Sandbox is required but failed to initialize: Failed to create bridge sockets after 5 attempts. Restart to retry. Running it outside the sandbox (dangerouslyDisableSandbox) is not allowed either.
+
+The browser tool also failed to start:
+
+> Error: async initializeServer: Socket directory path is too long (131 bytes); set PWTEST_SOCKETS_DIR to a shorter location.
+
+Fetching the live API with the web tool returned HTTP 403, so the changes were written against the API format in the earlier job's fixtures.
+
+| Check | Result on this revision |
+| --- | --- |
+| `npm run build` | Not run; `dist/` is the earlier revision |
+| `npm run typecheck` | Not run |
+| `npm test`, including new `tests/hamster.test.ts` and new room tests | Not run; the tests were written and traced by hand only |
+| `npm run check:browser` | Not run |
+| `taste.mjs` design probe | Not run |
+| `npm run check:budget` | Not run; no new runtime dependency was added |
+| First screen at 390 wide | Not re-measured. The new bar under the pitch adds about 40px above the main action, so this needs checking |
+| Real X login, two-player match on deployed services | Not run; needs the owner's Privy app and PartyKit deployment |
+
+### Better Interface review of this revision
+
+This was a source reading only, with no rendered checks.
+
+| Domain | Coverage and result |
+| --- | --- |
+| Accessibility | The advantage is shown by words and an icon as well as the ring color, and is announced at the start of each turn. The reconnect notice uses `role="status"`. The stream link's target height is 32px, below the 44px comfort target. |
+| Layout | The rule and stream link sit in their own row rather than over the pitch, to avoid covering other text. Wrapping is allowed for narrow phones. Not measured. |
+| Writing | Rules state the real effect and the 35% chance. The old line promising "the same fair odds" was removed because it is no longer true. |
+| Typography | Uses the existing `--text-xs` size and weight 600, so the scale stays at six sizes. Not measured. |
+| Colors | Uses existing orange and blue role tokens on the surface color. Contrast not measured. |
+| UI details | The ring is static, so reduced motion needs no special case. Ball and keeper timing changes were not observed. |
+
+### Findings fixed from source reading
+
+| Severity | Source | Problem and fix (none rerun) |
+| --- | --- | --- |
+| High | `components/Game.tsx`, `login` | Login could open behind the native dialog, leaving it unreachable. The dialog now closes first, and the chosen mode reopens after login, including after a redirect. |
+| High | `components/Game.tsx`, online effect | A next turn arriving during a reveal could leave the screen stuck on "locked". It now waits for the reveal to end. |
+| Medium | `party/server.ts`, `onClose` | Any brief connection loss ended the match. Players now get a 30-second seat hold and can rejoin. |
+| Medium | `components/useOnlineMatch.ts` | Quick-match rooms showed a private code to share, and the timer relied on the device clock. Both are fixed. |
+| Medium | `components/Game.tsx`, `animateKick` | The goal announcement named the wrong player for the second seat. It now uses the player's real seat. |
+
+## Earlier revision
+
 Worker-side checks on the static export, 2026-11-02. These observations are not independent certification.
 
 The summary includes the review revision. The original implementation records below are retained for context; the final section records the revision's reproductions, fixes and rerun results.

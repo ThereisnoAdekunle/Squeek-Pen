@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPair, SignJWT, type JWTVerifyGetKey } from "jose";
-import Server from "../party/server";
+import Server, { originAllowed } from "../party/server";
 import { identityFromClaims, verifySignedIdentity } from "../party/identity";
 
 const keys = generateKeyPair("ES256");
@@ -36,10 +36,37 @@ async function token(
     .sign((await keys).privateKey);
 }
 class TestServer extends Server {
+  core: Record<string, any> | null = null;
+  roll: number | undefined = undefined;
+  graceMs = 1000;
   verifyToken(value: string, id: string) {
     return verifySignedIdentity(value, id, getKey);
   }
+  async fetchCore() {
+    if (!this.core) throw new Error("Feed unavailable");
+    return this.core;
+  }
+  nextRoll() {
+    return this.roll;
+  }
 }
+const settled = (work: string) => ({
+  schemaVersion: 1,
+  status: "available",
+  configuration: { genesisTimestamp: "1793022600", roundDuration: "600" },
+  events: [
+    ["1037", "1036", work],
+    ["1036", "1035", "100"],
+  ].map(([round, previous, cumulative]) => ({
+    eventName: "BatchSettled",
+    arguments: [
+      { name: "settledThroughRound", value: round },
+      { name: "previousSettledThroughRound", value: previous },
+      { name: "cumulativeWork", value: cumulative },
+      { name: "activeRoundCount", value: "1" },
+    ],
+  })),
+});
 function fixture(id = "ABC234") {
   const connections = new Map<string, any>();
   let alarm: number | null = null;
@@ -238,12 +265,127 @@ test("rematch requires both players and resets the score and locked choices", as
   assert.equal(f.server.stage, "choosing");
   assert.equal(f.server.choices.size, 0);
 });
-test("disconnect ends the room and informs the remaining player", async () => {
+test("a dropped player holds their seat, then the other player wins by walkover", async () => {
   const f = await ready();
+  f.server.graceMs = 20;
   await f.server.onClose(f.a);
+  assert.equal(f.server.stage, "choosing");
+  assert.equal(f.b.messages.at(-1).type, "opponent-disconnected");
+  await new Promise((accept) => setTimeout(accept, 60));
   assert.equal(f.server.stage, "abandoned");
   assert.equal(f.b.messages.at(-1).type, "opponent-left");
+  assert.equal(f.b.messages.at(-1).walkover, true);
   assert.equal(f.alarm(), null);
+});
+test("a dropped player can rejoin the same seat with their match intact", async () => {
+  const f = await ready();
+  await f.choose(f.a, "left");
+  await f.server.onClose(f.a);
+  const again = await f.connect("a2");
+  await f.auth(again, "alice", "rejoin");
+  assert.equal(f.b.messages.at(-1).type, "state");
+  assert.equal(f.b.messages.at(-2).type, "opponent-back");
+  const restored = again.messages.at(-1);
+  assert.equal(restored.playerIndex, 0);
+  assert.equal(restored.youLocked, true);
+  assert.equal(f.b.messages.at(-1).youLocked, false);
+  assert.equal(f.server.graceTimers.size, 0);
+  await f.choose(f.b, "right");
+  assert.deepEqual(f.server.match.score, [1, 0]);
+});
+test("nobody can rejoin a match they were not part of", async () => {
+  const f = await ready();
+  const stranger = await f.connect("c");
+  await f.auth(stranger, "chris", "rejoin");
+  assert.ok(stranger.closed);
+  assert.equal(f.server.players.length, 2);
+});
+test("a host leaving before anyone joins closes the room", async () => {
+  const f = fixture();
+  const a = await f.connect("a");
+  await f.auth(a, "alice");
+  await f.server.onClose(a);
+  assert.equal(f.server.players.length, 0);
+  const b = await f.connect("b");
+  await f.auth(b, "bob", "join");
+  assert.ok(b.closed);
+});
+test("leaving after the final whistle ends the room without a walkover", async () => {
+  const f = await ready();
+  for (let i = 0; i < 6; i++) {
+    if (i > 0) await f.server.onAlarm();
+    await f.choose(f.a, "left");
+    await f.choose(f.b, i % 2 === 0 ? "right" : "left");
+  }
+  assert.equal(f.server.stage, "finished");
+  await f.server.onClose(f.a);
+  assert.equal(f.b.messages.at(-1).type, "opponent-left");
+  assert.equal(f.b.messages.at(-1).walkover, false);
+});
+test("the server applies the settled round, not anything a client sends", async () => {
+  const f = fixture();
+  (f.server as TestServer).core = settled("500");
+  (f.server as TestServer).roll = 0;
+  const a = await f.connect("a");
+  const b = await f.connect("b");
+  await f.auth(a, "alice");
+  await f.auth(b, "bob", "join");
+  assert.equal(a.messages.at(-1).hamster, "Zoomies");
+  assert.equal(b.messages.at(-1).hamster, "Zoomies");
+  await f.server.onMessage(
+    JSON.stringify({ type: "choose", direction: "left", hamster: "Nap" }),
+    a,
+  );
+  await f.choose(b, "left");
+  assert.deepEqual(f.server.match.score, [1, 0]);
+  const kick = b.messages.at(-1).match.kicks[0];
+  assert.equal(kick.twist, "too-fast");
+  assert.equal(kick.hamster, "Zoomies");
+});
+test("Nap gives the keeper the extra reach in a real room", async () => {
+  const f = fixture();
+  (f.server as TestServer).core = settled("100");
+  (f.server as TestServer).roll = 0;
+  const a = await f.connect("a");
+  const b = await f.connect("b");
+  await f.auth(a, "alice");
+  await f.auth(b, "bob", "join");
+  assert.equal(a.messages.at(-1).hamster, "Nap");
+  await f.choose(a, "center");
+  await f.choose(b, "left");
+  assert.deepEqual(f.server.match.score, [0, 0]);
+  assert.equal(a.messages.at(-1).match.kicks[0].twist, "long-reach");
+});
+test("an unavailable API leaves the match on normal rules", async () => {
+  const f = await ready();
+  assert.equal(f.a.messages.at(-1).hamster, null);
+  await f.choose(f.a, "left");
+  await f.choose(f.b, "left");
+  assert.deepEqual(f.server.match.score, [0, 0]);
+  assert.equal(f.a.messages.at(-1).match.kicks[0].twist, null);
+});
+test("the rule is fixed for the turn and picked up on the next one", async () => {
+  const f = await ready();
+  const server = f.server as TestServer;
+  assert.equal(f.a.messages.at(-1).hamster, null);
+  server.core = settled("500");
+  server.feedCheckedAt = 0;
+  await f.choose(f.a, "left");
+  await f.choose(f.b, "right");
+  assert.equal(f.a.messages.at(-1).hamster, null);
+  await server.onAlarm();
+  assert.equal(f.a.messages.at(-1).hamster, "Zoomies");
+});
+test("origin rules accept listed origins and subdomain wildcards only", () => {
+  const rules = "https://*.imd.site, https://squeek.example";
+  assert.ok(originAllowed(rules, "https://squeek.imd.site"));
+  assert.ok(originAllowed(rules, "https://squeek.example"));
+  assert.ok(!originAllowed(rules, "http://squeek.imd.site"));
+  assert.ok(!originAllowed(rules, "https://imd.site"));
+  assert.ok(!originAllowed(rules, "https://evil.test/.imd.site"));
+  assert.ok(!originAllowed(rules, "https://imd.site.evil.test"));
+  assert.ok(!originAllowed(rules, null));
+  assert.ok(!originAllowed(undefined, "https://squeek.imd.site"));
 });
 test("matchmaking pairs two different authenticated users with the same new room", async () => {
   const f = fixture("matchmaking");
