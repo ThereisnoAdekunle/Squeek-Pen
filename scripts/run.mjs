@@ -24,7 +24,7 @@ const inputs = [
   "next-env.d.ts",
   "next.config.ts",
   "postcss.config.mjs",
-  "partykit.json",
+  "wrangler.jsonc",
 ];
 for (const file of inputs) {
   await rm(join(stage, file), { recursive: true, force: true });

@@ -1,4 +1,37 @@
-import type * as Party from "partykit/server";
+/**
+ * The minimal room and connection shapes the game rules rely on. PartyServer
+ * (see worker.ts) satisfies them, and the tests supply plain objects, so this
+ * file holds the game rules only and never touches the hosting platform.
+ */
+namespace Party {
+  export interface Connection {
+    id: string;
+    state: unknown;
+    setState(state: unknown): unknown;
+    send(message: string): void;
+    close(code?: number, reason?: string): void;
+  }
+  export interface ConnectionContext {
+    request: { headers: { get(name: string): string | null } };
+  }
+  export interface Room {
+    id: string;
+    env: Record<string, unknown>;
+    storage: {
+      setAlarm(time: number): Promise<void>;
+      deleteAlarm(): Promise<void>;
+    };
+    getConnection(id: string): Connection | undefined;
+    getConnections(): Iterable<Connection>;
+  }
+  export interface Server {
+    onConnect(connection: Connection, ctx: ConnectionContext): void | Promise<void>;
+    onMessage(message: string | ArrayBuffer, sender: Connection): void | Promise<void>;
+    onClose(connection: Connection): void | Promise<void>;
+    onAlarm(): void | Promise<void>;
+  }
+}
+
 import {
   directions,
   isDirection,
