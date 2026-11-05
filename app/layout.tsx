@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+
 export const metadata: Metadata = {
   title: "SQUEEK PENALTY · Tiny paws. Big pressure.",
   description:
@@ -10,7 +11,11 @@ export const metadata: Metadata = {
     description: "Tiny paws. Big pressure. The hamster penalty shootout.",
   },
   twitter: { card: "summary_large_image", title: "SQUEEK PENALTY" },
+  other: {
+    "squeekchain-project": "4a43879b-dbde-43c9-a08a-971df70faa3b",
+  },
 };
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -22,6 +27,7 @@ export default function RootLayout({
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta name="twitter:image" content="./og-image.png" />
+        <meta name="squeekchain-project" content="4a43879b-dbde-43c9-a08a-971df70faa3b" />
       </head>
       <body>{children}</body>
     </html>
