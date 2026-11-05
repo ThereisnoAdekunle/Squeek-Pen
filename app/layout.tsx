@@ -1,4 +1,3 @@
-
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -25,7 +24,7 @@ export default function RootLayout({
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta name="twitter:image" content="./og-image.png" />
-        <meta name="squeekchain-project" content="4a43879b-dbde-43c9-a08a-971df70faa3b" />
+        <meta name="squeekchain-project" content="4a43879b-dbde-43c9-a68a-971df70faa3b" />
       </head>
       <body>{children}</body>
     </html>

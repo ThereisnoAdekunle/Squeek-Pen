@@ -1,5 +1,5 @@
 # SQUEEK PENALTY
-squeekchain-project: 4a43879b-dbde-43c9-a08a-971df70faa3b
+squeekchain-project: 4a43879b-dbde-43c9-a68a-971df70faa3b
 
 A mobile-first hamster penalty shootout built with Next.js App Router, TypeScript, Tailwind CSS, custom SVG characters, and synthesized Web Audio. The production site is in `dist/`; it runs from a plain static host, including a gateway subpath.
 
