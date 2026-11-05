@@ -7,9 +7,12 @@ declare module "cloudflare:workers" {
       storage: {
         setAlarm(time: number): Promise<void>;
         deleteAlarm(): Promise<void>;
+        get<T = unknown>(key: string): Promise<T | undefined>;
+        put(key: string, value: unknown): Promise<void>;
       };
     };
     env: Env;
     constructor(ctx: unknown, env: Env);
+    fetch(request: Request): Response | Promise<Response>;
   }
 }

@@ -23,6 +23,8 @@ namespace Party {
     };
     getConnection(id: string): Connection | undefined;
     getConnections(): Iterable<Connection>;
+    /** Settled-round feed kept by the Worker. Used only when /v1/core is down. */
+    feed?: () => Promise<unknown>;
   }
   export interface Server {
     onConnect(connection: Connection, ctx: ConnectionContext): void | Promise<void>;
@@ -47,6 +49,7 @@ import {
   resolveHamsterKick,
   type HamsterFeed,
 } from "../rules/hamster";
+import { snapshotToFeed } from "../lib/feed";
 import { verifyIdentity, type Identity } from "./identity";
 
 const CORE_URL = "https://api.squeekchain.com/v1/core";
@@ -116,6 +119,12 @@ export default class Server implements Party.Server {
     this.feedCheckedAt = Date.now();
     try {
       this.feed = parseFeed(null, await this.fetchCore());
+      return;
+    } catch {}
+    // /v1/core is down or unusable: fall back to the settled rounds the feed keeper tracks.
+    try {
+      if (this.room.feed) this.feed = snapshotToFeed(await this.room.feed());
+      else throw new Error("No feed service");
     } catch {
       if (this.feed && Date.now() - this.feed.receivedAt > FEED_STALE_MS)
         this.feed = null;

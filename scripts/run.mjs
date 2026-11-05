@@ -77,6 +77,7 @@ if (action === "build") {
     "tests/rooms.test.ts",
     "tests/activity.test.ts",
     "tests/hamster.test.ts",
+    "tests/feed.test.ts",
   ]);
 } else if (action === "dev") {
   await run("node", ["node_modules/next/dist/bin/next", "dev", "--webpack"]);

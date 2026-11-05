@@ -4,12 +4,20 @@
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "Main", "class_name": "SqueekRoom" }]
+    "bindings": [
+      { "name": "Main", "class_name": "SqueekRoom" },
+      { "name": "Feed", "class_name": "FeedKeeper" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SqueekRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SqueekRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["FeedKeeper"] }
+  ],
+  // Reads the Squeekchain status once a minute.
+  "triggers": { "crons": ["* * * * *"] },
   // Public configuration, not secrets. Add your live site to ALLOWED_ORIGIN.
   "vars": {
-    "ALLOWED_ORIGIN": "https://*.imd.site,http://localhost:3000",
+    "ALLOWED_ORIGIN": "https://*.imd.site,http://localhost:3000,https://squeek-pen.vercel.app,https://squeekpen.xyz",
     "PRIVY_APP_ID": "cmw11pga400ru0fl97o6wd61n"
   }
 }

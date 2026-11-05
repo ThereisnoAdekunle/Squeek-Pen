@@ -53,13 +53,12 @@ import {
 } from "@/lib/game";
 import type { Activity } from "@/lib/activity";
 import { sound, unlockAudio } from "@/lib/sound";
+import { loadFeed, type LiveFeed } from "@/lib/feed";
 import {
   FEED_STALE_MS,
   flightMs,
   hamsterRule,
-  parseFeed,
   resolveHamsterKick,
-  type HamsterFeed,
   type HamsterKick,
   type Twist,
 } from "@/rules/hamster";
@@ -139,7 +138,7 @@ export default function Game() {
   const [twist, setTwist] = useState<Twist | null>(null);
   const [turnHamster, setTurnHamster] = useState<Activity | null>(null);
   const [revealTick, setRevealTick] = useState(0);
-  const [live, setLive] = useState<HamsterFeed | null>(null);
+  const [live, setLive] = useState<LiveFeed | null>(null);
   const [feedState, setFeedState] = useState<"loading" | "live" | "offline">(
     "loading",
   );
@@ -157,7 +156,7 @@ export default function Game() {
   const soundRef = useRef(soundOn);
   const recordedMatch = useRef(false);
   const revealing = useRef(false);
-  const lastGoodFeed = useRef<HamsterFeed | null>(null);
+  const lastGoodFeed = useRef<LiveFeed | null>(null);
   const turnHamsterRef = useRef<Activity | null>(null);
   const feedHamsterRef = useRef<Activity | null>(null);
   const online = useOnlineMatch({ host: config.partyHost, token: auth.token });
@@ -260,21 +259,11 @@ export default function Game() {
       controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 7000);
       try {
-        const [statusResult, coreResult] = await Promise.allSettled(
-          ["status", "core"].map(async (p) => {
-            const r = await fetch(`https://api.squeekchain.com/v1/${p}`, {
-              signal: controller.signal,
-              cache: "no-cache",
-            });
-            if (!r.ok) throw new Error();
-            return r.json();
-          }),
-        );
-        if (coreResult.status === "rejected") throw new Error();
-        const data = parseFeed(
-          statusResult.status === "fulfilled" ? statusResult.value : null,
-          coreResult.value,
-        );
+        // Sources in order: /v1/core, the game server's feed keeper, then /v1/status alone.
+        const data = await loadFeed({
+          partyHost: config.partyHost,
+          signal: controller.signal,
+        });
         lastGoodFeed.current = data;
         if (!disposed) {
           setLive(data);
@@ -302,7 +291,7 @@ export default function Game() {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, []);
+  }, [config.partyHost]);
   const beginTurn = useCallback(
     (next: Match) => {
       matchRef.current = next;
@@ -778,7 +767,7 @@ export default function Game() {
                   aria-hidden="true"
                 />
                 {feedState === "live"
-                  ? `Round #${live?.round} · Last: ${live?.outcome || "Unknown"}`
+                  ? `Round #${live?.round} · Last: ${live?.outcome || "Unknown"}${live?.settledBlock ? ` · Squeek block #${live.settledBlock}` : ""}`
                   : "Live feed unavailable"}
               </div>
               <div className="pitch-corner pitch-corner-right">
@@ -1143,6 +1132,16 @@ export default function Game() {
                   )}
                 </span>
               </div>
+              {feedState === "live" && live?.settledBlock ? (
+                <div className="live-round">
+                  <span>
+                    Squeek block <strong>#{live.settledBlock}</strong>
+                  </span>
+                  <span>
+                    Settled round <strong>#{live.settledRound}</strong>
+                  </span>
+                </div>
+              ) : null}
               <a
                 href="https://squeekchain.com/"
                 target="_blank"
