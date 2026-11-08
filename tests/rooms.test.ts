@@ -552,3 +552,60 @@ test("unknown authentication actions cannot create a room", async () => {
   assert.ok(a.closed);
   assert.equal(f.server.players.length, 0);
 });
+async function zoomiesRoom(work: string | null, roll: number, record?: (event: any) => Promise<void>) {
+  const events: any[] = [];
+  const f = fixture();
+  (f.server as any).room.record =
+    record ??
+    (async (event: any) => {
+      events.push(event);
+    });
+  const server = f.server as TestServer;
+  server.core = work === null ? null : settled(work);
+  server.roll = roll;
+  const a = await f.connect("a");
+  const b = await f.connect("b");
+  await f.auth(a, "alice");
+  await f.auth(b, "bob", "join");
+  return { f, a, b, events };
+}
+test("a goal scored under Zoomies is reported for the leaderboard", async () => {
+  const { f, a, b, events } = await zoomiesRoom("500", 0);
+  await f.choose(a, "left");
+  await f.choose(b, "left");
+  assert.deepEqual(f.server.match.score, [1, 0]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].zoomiesGoals, 1);
+  assert.match(events[0].handle, /^@/);
+  assert.equal(events[0].userId, f.server.players[0].id);
+});
+test("nothing is reported for a Zoomies miss, a Nap goal, or an unavailable feed", async () => {
+  const miss = await zoomiesRoom("500", 0.99);
+  await miss.f.choose(miss.a, "left");
+  await miss.f.choose(miss.b, "left");
+  assert.deepEqual(miss.f.server.match.score, [0, 0]);
+  assert.equal(miss.events.length, 0);
+  const nap = await zoomiesRoom("100", 0);
+  await nap.f.choose(nap.a, "left");
+  await nap.f.choose(nap.b, "right");
+  assert.deepEqual(nap.f.server.match.score, [1, 0]);
+  assert.equal(nap.events.length, 0);
+  const offline = await zoomiesRoom(null, 0);
+  await offline.f.choose(offline.a, "left");
+  await offline.f.choose(offline.b, "right");
+  assert.deepEqual(offline.f.server.match.score, [1, 0]);
+  assert.equal(offline.events.length, 0);
+});
+test("a failing or missing leaderboard never disturbs the match", async () => {
+  const broken = await zoomiesRoom("500", 0, async () => {
+    throw new Error("arena down");
+  });
+  await broken.f.choose(broken.a, "left");
+  await broken.f.choose(broken.b, "left");
+  assert.deepEqual(broken.f.server.match.score, [1, 0]);
+  const none = await zoomiesRoom("500", 0);
+  delete (none.f.server as any).room.record;
+  await none.f.choose(none.a, "left");
+  await none.f.choose(none.b, "left");
+  assert.deepEqual(none.f.server.match.score, [1, 0]);
+});

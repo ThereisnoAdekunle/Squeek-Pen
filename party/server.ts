@@ -25,6 +25,13 @@ namespace Party {
     getConnections(): Iterable<Connection>;
     /** Settled-round feed kept by the Worker. Used only when /v1/core is down. */
     feed?: () => Promise<unknown>;
+    /** Reports a goal scored while the settled rule was Zoomies. Best effort. */
+    record?: (event: {
+      userId: string;
+      handle: string;
+      avatar: string | null;
+      zoomiesGoals: number;
+    }) => Promise<void>;
   }
   export interface Server {
     onConnect(connection: Connection, ctx: ConnectionContext): void | Promise<void>;
@@ -326,6 +333,18 @@ export default class Server implements Party.Server {
       );
     });
   }
+  reportZoomiesGoal(player: Player) {
+    try {
+      void this.room
+        .record?.({
+          userId: player.id,
+          handle: player.handle,
+          avatar: player.avatar,
+          zoomiesGoals: 1,
+        })
+        ?.catch(() => {});
+    } catch {}
+  }
   async settle() {
     if (this.stage !== "choosing" || this.players.length !== 2) return;
     const kicker = this.players[this.match.kicker];
@@ -341,6 +360,9 @@ export default class Server implements Party.Server {
       hamster: this.turnHamster,
       roll: this.nextRoll(),
     });
+    // Only a real goal scored under a Zoomies turn counts toward the leaderboard.
+    if (this.turnHamster === "Zoomies" && this.match.kicks.at(-1)?.goal)
+      this.reportZoomiesGoal(kicker);
     this.stage = this.match.winner === null ? "revealing" : "finished";
     this.deadline = Date.now() + 14000;
     if (this.stage === "revealing")

@@ -7,19 +7,22 @@ import {
 } from "partyserver";
 import GameRoom from "./server";
 import { FeedKeeper } from "./feed";
+import { Arena } from "./arena";
 
-type Stub = { fetch(input: string, init?: RequestInit): Promise<Response> };
+type Stub = { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
 type Namespace = { idFromName(name: string): unknown; get(id: unknown): Stub };
 type Env = {
   Main: unknown;
   Feed: Namespace;
+  Arena: Namespace;
   ALLOWED_ORIGIN: string;
   PRIVY_APP_ID: string;
 };
 
-export { FeedKeeper };
+export { FeedKeeper, Arena };
 
 const feedStub = (env: Env) => env.Feed.get(env.Feed.idFromName("main"));
+const arenaStub = (env: Env) => env.Arena.get(env.Arena.idFromName("main"));
 
 /**
  * One Durable Object per room. All game rules live in ./server.ts; this class
@@ -39,6 +42,14 @@ export class SqueekRoom extends PartyServerBase<Env> {
       storage: server.ctx.storage,
       getConnection: (id: string) => server.getConnection(id) as any,
       getConnections: () => server.getConnections() as Iterable<any>,
+      // Goals scored while the settled rule is Zoomies feed the leaderboard.
+      record: async (event: unknown) => {
+        await arenaStub(server.env).fetch("https://arena.internal/record", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(event),
+        });
+      },
       // Settled-round feed kept by FeedKeeper, used when /v1/core is down.
       feed: async () => {
         const response = await feedStub(server.env).fetch("https://feed.internal/feed");
@@ -81,6 +92,9 @@ export default {
         response.headers.set(key, value);
       return response;
     }
+    // Leaderboard and predictions: the Arena checks origins and identity itself.
+    if (["/leaderboard", "/prediction", "/predict"].includes(url.pathname))
+      return arenaStub(env).fetch(request);
     return (
       (await routePartykitRequest(request, env as any)) ||
       new Response("Not Found", { status: 404 })
@@ -88,6 +102,12 @@ export default {
   },
   // Cron: read /v1/status every minute so no settled round is missed.
   async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    ctx.waitUntil(feedStub(env).fetch("https://feed.internal/refresh"));
+    ctx.waitUntil(
+      (async () => {
+        await feedStub(env).fetch("https://feed.internal/refresh");
+        // Settle open predictions as soon as a new settled round is known.
+        await arenaStub(env).fetch("https://arena.internal/resolve", { method: "POST" });
+      })(),
+    );
   },
 };

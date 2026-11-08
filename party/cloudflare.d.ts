@@ -9,6 +9,8 @@ declare module "cloudflare:workers" {
         deleteAlarm(): Promise<void>;
         get<T = unknown>(key: string): Promise<T | undefined>;
         put(key: string, value: unknown): Promise<void>;
+        delete(key: string): Promise<boolean>;
+        list<T = unknown>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
       };
     };
     env: Env;

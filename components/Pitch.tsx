@@ -59,7 +59,7 @@ export default function Pitch({
       ? Math.round(laneX(dive) * 0.35 + laneX(shot) * 0.65)
       : laneX(dive);
   const style = {
-    "--shot-x": shot === "left" ? "-145px" : shot === "right" ? "145px" : "0px",
+    "--shot-x": shot === "left" ? "-116px" : shot === "right" ? "116px" : "0px",
     "--dive-x": `${keeperX}px`,
     "--dive-rot":
       dive === "left" ? "-58deg" : dive === "right" ? "58deg" : "0deg",
@@ -187,14 +187,32 @@ export default function Pitch({
         />
         <path d="M0 250H800V500H0Z" fill="url(#turf)" />
         <ellipse cx="400" cy="372" rx="350" ry="170" fill="url(#spot)" />
+        {/* Goal line, six-yard box and penalty area, drawn in perspective. */}
         <path
-          d="M222 286L96 462H704L578 286M291 286L247 345H553L509 286M324 384Q400 420 476 384"
+          d="M0 310H800M250 310L232 352H568L550 310M120 310L40 490H760L680 310"
           stroke="#b3e4d0"
           strokeWidth="2"
-          opacity=".22"
+          opacity=".28"
           fill="none"
         />
-        <ellipse cx="400" cy="418" rx="5" ry="2" fill="#d1e7dd" opacity=".65" />
+        {/* Penalty spot with a dashed guide and distance tag back to the goal. */}
+        <path
+          d="M400 424V322"
+          stroke="#e3f6ff"
+          strokeWidth="2"
+          strokeDasharray="7 9"
+          strokeLinecap="round"
+          opacity=".34"
+        />
+        <path d="M391 322H409M392 318V326M408 318V326" stroke="#e3f6ff" strokeWidth="2" opacity=".4" fill="none" />
+        <g opacity=".85">
+          <rect x="415" y="360" width="58" height="26" rx="13" fill="#0b263a" opacity=".72" />
+          <text x="444" y="378" textAnchor="middle" fontSize="16" fontWeight="700" fill="#d7efff">
+            11 m
+          </text>
+        </g>
+        <ellipse cx="400" cy="436" rx="19" ry="7" fill="none" stroke="#e3f6ff" strokeWidth="2" opacity=".4" />
+        <ellipse cx="400" cy="436" rx="8" ry="3.2" fill="#f4fbff" opacity=".95" />
         <g opacity=".8">
           <path d="M91 42L-40 400H400Z" fill="url(#beam)" />
           <path d="M709 42L840 400H400Z" fill="url(#beam)" />
@@ -210,78 +228,81 @@ export default function Pitch({
             </g>
           ))}
         </g>
-        <path
-          d="M223 188L244 166H556L577 188V312H223Z"
-          fill="#091c2a"
-          opacity=".5"
-        />
-        <g className="goal-net">
-          <path d="M225 191L247 171H553L575 191V310H225Z" fill="url(#net)" />
+        {/* The goal and keeper sit further away: drawn at 80% around the middle of the goal line. */}
+        <g transform="translate(400 310) scale(0.8) translate(-400 -310)">
           <path
-            d="M225 191H575M247 171V290H553V171M225 310L247 290M575 310L553 290"
-            stroke="#95acbd"
-            opacity=".55"
-            fill="none"
+            d="M223 188L244 166H556L577 188V312H223Z"
+            fill="#091c2a"
+            opacity=".5"
           />
-        </g>
-        <path
-          d="M224 312V188H576V312"
-          stroke="#09232b"
-          strokeWidth="12"
-          strokeLinecap="round"
-          fill="none"
-          opacity=".3"
-          transform="translate(3 3)"
-        />
-        <path
-          d="M224 310V188H576V310"
-          stroke="url(#post)"
-          strokeWidth="7"
-          strokeLinecap="round"
-          fill="none"
-        />
-        <path d="M227 190H573" stroke="#e4fcff" strokeWidth="2" opacity=".8" />
-        <g className="goalkeeper-position" transform="translate(350 222)">
-          <foreignObject
-            x="-10"
-            y="-4"
-            width="120"
-            height="136"
-            overflow="visible"
-          >
-            <div className="goalkeeper">
-              <Hamster
-                color={role === "kick" ? "orange" : "blue"}
-                sleepy={activity === "Nap"}
-              />
-            </div>
-          </foreignObject>
-        </g>
-        {activity === "Nap" && !reveal && (
-          <g fill="#a8c5ef" opacity=".8">
+          <g className="goal-net">
+            <path d="M225 191L247 171H553L575 191V310H225Z" fill="url(#net)" />
             <path
-              d="M456 218H466L456 229H466M470 203H478L470 212H478"
-              stroke="currentColor"
-              strokeWidth="2"
+              d="M225 191H575M247 171V290H553V171M225 310L247 290M575 310L553 290"
+              stroke="#95acbd"
+              opacity=".55"
               fill="none"
             />
           </g>
-        )}
+          <path
+            d="M224 312V188H576V312"
+            stroke="#09232b"
+            strokeWidth="12"
+            strokeLinecap="round"
+            fill="none"
+            opacity=".3"
+            transform="translate(3 3)"
+          />
+          <path
+            d="M224 310V188H576V310"
+            stroke="url(#post)"
+            strokeWidth="7"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <path d="M227 190H573" stroke="#e4fcff" strokeWidth="2" opacity=".8" />
+          <g className="goalkeeper-position" transform="translate(350 222)">
+            <foreignObject
+              x="-10"
+              y="-4"
+              width="120"
+              height="136"
+              overflow="visible"
+            >
+              <div className="goalkeeper">
+                <Hamster
+                  color={role === "kick" ? "orange" : "blue"}
+                  sleepy={activity === "Nap"}
+                />
+              </div>
+            </foreignObject>
+          </g>
+          {activity === "Nap" && !reveal && (
+            <g fill="#a8c5ef" opacity=".8">
+              <path
+                d="M456 218H466L456 229H466M470 203H478L470 212H478"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+              />
+            </g>
+          )}
+        </g>
         <ellipse
           className="ball-shadow"
           cx="400"
-          cy="429"
-          rx="18"
+          cy="442"
+          rx="17"
           ry="5"
           fill="#031a25"
           opacity=".5"
         />
-        <g transform="translate(290 306)">
+        <g transform="translate(294 356)">
           <foreignObject
-            x="-10"
-            y="-8"
-            width="150"
-            height="170"
+            x="0"
+            y="0"
+            width="98"
+            height="111"
             overflow="visible"
           >
             <div className="kicker">
@@ -290,13 +311,13 @@ export default function Pitch({
           </foreignObject>
         </g>
         {activity === "Zoomies" && (
-          <g className="sparkles" fill="#ffcb6c">
+          <g className="sparkles" fill="#ffcb6c" transform="translate(4 70)">
             <path d="M318 332L321 322L324 332L334 335L324 338L321 348L318 338L308 335ZM292 369L294 362L296 369L303 371L296 373L294 380L292 373L285 371ZM366 315L368 308L370 315L377 317L370 319L368 326L366 319L359 317Z" />
           </g>
         )}
         <foreignObject
           x="381"
-          y="397"
+          y="403"
           width="38"
           height="38"
           overflow="visible"
@@ -305,11 +326,21 @@ export default function Pitch({
             <Football />
           </div>
         </foreignObject>
+        {phase === "choose" && (
+          <g className="scene-targets" aria-hidden="true">
+            {[-116, 0, 116].map((dx) => (
+              <g key={dx}>
+                <circle cx={400 + dx} cy="258" r="16" fill="none" stroke="#e2f2ff" strokeWidth="2" strokeDasharray="4 5" opacity=".6" />
+                <path d={`M${400 + dx - 5} 258H${400 + dx + 5}M${400 + dx} 253V263`} stroke="#d2e9f6" strokeWidth="2" opacity=".7" />
+              </g>
+            ))}
+          </g>
+        )}
         {phase === "result" && !goal && (
           <g className="dust" fill="#c0b79c" opacity=".6">
-            <ellipse cx={400 + keeperX} cy="307" rx="42" ry="12" />
-            <circle cx={375 + keeperX} cy="296" r="13" />
-            <circle cx={419 + keeperX} cy="299" r="10" />
+            <ellipse cx={400 + keeperX * 0.8} cy="307" rx="34" ry="10" />
+            <circle cx={400 + keeperX * 0.8 - 24} cy="297" r="11" />
+            <circle cx={400 + keeperX * 0.8 + 20} cy="299" r="9" />
           </g>
         )}
         <path
@@ -320,15 +351,6 @@ export default function Pitch({
           fill="none"
         />
       </svg>
-      {phase === "choose" && (
-        <div className="goal-targets" aria-hidden="true">
-          {(["left", "center", "right"] as Direction[]).map((d) => (
-            <span key={d} className={`target target-${d}`}>
-              +
-            </span>
-          ))}
-        </div>
-      )}
       {phase === "choose" && (
         <div className="pitch-role">
           <span className="tiny-dot" />

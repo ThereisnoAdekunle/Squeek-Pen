@@ -60,3 +60,12 @@ export function sound(
       tone(f, 0.45 + i * 0.12, 0.5, "sine", 0.08),
     );
 }
+
+/** A short vibration on phones that support it (Android). Silent elsewhere and with reduced motion. */
+export function buzz(pattern: number | number[]) {
+  try {
+    if (typeof window === "undefined" || !navigator.vibrate) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    navigator.vibrate(pattern);
+  } catch {}
+}

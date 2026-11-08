@@ -53,6 +53,15 @@ export class FeedKeeper extends DurableObject<FeedEnv> {
       await this.refresh(true).catch(() => null);
       return new Response("ok");
     }
+    if (path === "/history") {
+      // Internal: the Arena resolves predictions against every settled outcome, not just the latest.
+      const snapshot = await this.refresh().catch(() => this.snapshot);
+      const state = await this.ctx.storage.get<KeeperState>("state");
+      return Response.json(
+        { snapshot: snapshot ?? null, history: state?.history ?? [] },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     // A short upstream outage serves the last good reading, which the client
     // stops trusting once it is older than ten minutes.
     const snapshot = await this.refresh().catch(() => this.snapshot);

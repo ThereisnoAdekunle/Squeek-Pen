@@ -52,8 +52,9 @@ import {
   type Match,
 } from "@/lib/game";
 import type { Activity } from "@/lib/activity";
-import { sound, unlockAudio } from "@/lib/sound";
+import { buzz, sound, unlockAudio } from "@/lib/sound";
 import { loadFeed, type LiveFeed } from "@/lib/feed";
+import ArenaPanel from "./ArenaPanel";
 import {
   FEED_STALE_MS,
   flightMs,
@@ -362,6 +363,7 @@ export default function Game() {
         setMatch(next);
         matchRef.current = next;
         sound(kick.goal ? "goal" : "save", soundRef.current);
+        buzz(kick.goal ? [40, 50, 40] : 24);
         setAnnouncement(
           `${kick.twist === "too-fast" ? "Too fast. Goal" : kick.twist === "long-reach" ? "Long-reach save" : kick.goal ? "Goal" : "Saved"}. ${kick.kicker === me ? playerHandle : opponentHandle} ${next.score[kick.kicker]}. Score ${next.score[me]} to ${next.score[me === 0 ? 1 : 0]}.`,
         );
@@ -372,6 +374,7 @@ export default function Game() {
           if (next.winner !== null) {
             transition("finished");
             sound("win", soundRef.current);
+            buzz([50, 60, 50, 60, 120]);
           } else if (!onlineActive) beginTurn(next);
           else {
             transition("locked");
@@ -393,10 +396,24 @@ export default function Game() {
       transition,
     ],
   );
+  // On phones the match comes first: when play starts, bring the arena to the top of the screen.
+  const playing = phase !== "idle" && phase !== "finished";
+  useEffect(() => {
+    if (!playing) return;
+    if (!window.matchMedia("(max-width: 730px), (max-height: 520px)").matches) return;
+    const frame = requestAnimationFrame(() => {
+      const arena = document.getElementById("arena");
+      if (arena && Math.abs(arena.getBoundingClientRect().top) > 6)
+        arena.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [playing]);
+
   const choose = useCallback(
     (direction: Direction, timedOut = false) => {
       if (phaseRef.current !== "choose") return;
       unlockAudio();
+      if (!timedOut) buzz(14);
       if (onlineActive) {
         online.choose(direction);
         transition("locked");
@@ -694,7 +711,11 @@ export default function Game() {
           </div>
         </div>
       </header>
-      <main id="main-content" className="main-content">
+      <main
+        id="main-content"
+        className="main-content"
+        data-playing={phase !== "idle" && phase !== "finished" ? "true" : "false"}
+      >
         <div className={`intro-row ${showIntro ? "intro-enter" : ""}`}>
           <div>
             <h1>
@@ -767,7 +788,12 @@ export default function Game() {
                   aria-hidden="true"
                 />
                 {feedState === "live"
-                  ? `Round #${live?.round} · Last: ${live?.outcome || "Unknown"}${live?.settledBlock ? ` · Squeek block #${live.settledBlock}` : ""}`
+                  ? <>
+                    {`Round #${live?.round} · Last: ${live?.outcome || "Unknown"}`}
+                    {live?.settledBlock ? (
+                      <span className="pitch-block">{` · Squeek block #${live.settledBlock}`}</span>
+                    ) : null}
+                  </>
                   : "Live feed unavailable"}
               </div>
               <div className="pitch-corner pitch-corner-right">
@@ -1152,6 +1178,13 @@ export default function Game() {
                 <ArrowUpRight size={16} />
               </a>
             </section>
+            <ArenaPanel
+              host={config.partyHost}
+              token={auth.token}
+              authenticated={auth.authenticated}
+              onLogin={login}
+              settledRound={feedState === "live" ? (live?.settledRound ?? null) : null}
+            />
             <div className="personal-record">
               <Trophy size={20} />
               <div>

@@ -78,6 +78,8 @@ if (action === "build") {
     "tests/activity.test.ts",
     "tests/hamster.test.ts",
     "tests/feed.test.ts",
+    "tests/arena.test.ts",
+    "tests/arenaPanel.test.ts",
   ]);
 } else if (action === "dev") {
   await run("node", ["node_modules/next/dist/bin/next", "dev", "--webpack"]);

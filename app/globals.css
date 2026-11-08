@@ -608,10 +608,10 @@ strong {
   transition: transform 400ms var(--ease);
 }
 .runup .kicker {
-  transform: translate(34px, -23px) rotate(-10deg);
+  transform: translate(22px, -15px) rotate(-9deg);
 }
 .revealing .kicker {
-  transform: translate(32px, -20px) rotate(8deg);
+  transform: translate(20px, -12px) rotate(6deg);
 }
 .flying-ball {
   width: 38px;
@@ -625,7 +625,7 @@ strong {
   height: 100%;
 }
 .flying-ball.fly {
-  transform: translate(var(--shot-x), -151px) scale(0.58) rotate(290deg);
+  transform: translate(var(--shot-x), -172px) scale(0.58) rotate(290deg);
 }
 .revealing .ball-shadow {
   opacity: 0;
@@ -2556,4 +2556,312 @@ strong {
 .avatar > img {
   position: absolute;
   inset: 0;
+}
+
+/* Wheel predictions and the Zoomies leaderboard */
+.arena-card {
+  background: var(--color-surface);
+  border-radius: 16px;
+  padding: 18px 20px 20px;
+  margin-top: 16px;
+}
+.arena-points {
+  color: var(--color-action);
+  font-weight: 600;
+}
+.arena-question {
+  margin: 12px 0 4px;
+  font-size: var(--text-base, 1rem);
+  line-height: 1.3;
+}
+.arena-note {
+  margin: 0 0 12px;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.arena-picks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.arena-pick,
+.arena-login {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-elevated);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.arena-login {
+  width: 100%;
+  background: var(--color-action);
+  color: var(--navy-950);
+  border-color: transparent;
+}
+.arena-pick:hover:not(:disabled) {
+  background: var(--color-hover);
+  border-color: var(--color-action);
+}
+.arena-login:hover {
+  background: var(--color-action-hover);
+}
+.arena-pick:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.arena-pick:focus-visible,
+.arena-login:focus-visible,
+.arena-tab:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.arena-status,
+.arena-result {
+  margin: 10px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.arena-status strong {
+  color: var(--color-text);
+}
+.arena-win {
+  color: var(--color-success);
+  animation: arena-glow 1.6s ease-out 1;
+}
+.arena-miss {
+  color: var(--color-danger);
+}
+@keyframes arena-glow {
+  0% {
+    text-shadow: 0 0 0 transparent;
+  }
+  30% {
+    text-shadow: 0 0 14px var(--color-success);
+  }
+  100% {
+    text-shadow: 0 0 0 transparent;
+  }
+}
+.arena-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+.arena-tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.arena-tab[aria-selected="true"] {
+  color: var(--color-text);
+  border-bottom-color: var(--color-action);
+}
+.arena-board {
+  position: relative;
+  padding-top: 10px;
+}
+.arena-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.arena-row {
+  display: grid;
+  grid-template-columns: 18px 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+.arena-rank {
+  color: var(--color-subtle);
+  text-align: center;
+}
+.arena-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-elevated);
+  object-fit: cover;
+}
+.arena-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arena-value {
+  color: var(--color-muted);
+}
+.arena-empty {
+  margin: 4px 22px 0 0;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arena-win {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Phones: the match comes first
+   --------------------------------------------------------------------------- */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+button,
+a,
+input {
+  touch-action: manipulation;
+}
+.arena {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.site-header {
+  padding-top: var(--safe-top);
+}
+.site-footer {
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+/* The status chips sat on top of the ball and the spot, so they move above the action. */
+.pitch-role,
+.locked-label {
+  bottom: auto;
+  top: 19%;
+}
+/* Thumb-sized targets on touch screens (44px is the usual minimum). */
+@media (pointer: coarse) {
+  .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .connect-button {
+    min-height: 44px;
+  }
+  .hamster-watch,
+  .stream-link,
+  .powered-badge,
+  .site-footer a {
+    min-height: 44px;
+  }
+  .arena-tab,
+  .arena-pick,
+  .arena-login {
+    min-height: 44px;
+  }
+  .brand,
+  .text-button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .direction-button {
+    min-height: 58px;
+  }
+  /* Keyboard hints mean nothing on a touch screen and crowd the buttons. */
+  .direction-button kbd {
+    display: none;
+  }
+  .room-input-row input {
+    min-height: 48px;
+  }
+}
+@media (max-width: 730px) {
+  /* The chips repeat what the panel below already says ("Pick your shot"). */
+  .pitch-role,
+  .locked-label {
+    display: none;
+  }
+  /* While a match is on, the headline gives its space to the pitch and the buttons. */
+  .main-content[data-playing="true"] {
+    padding-top: 10px;
+  }
+  .main-content[data-playing="true"] .intro-row {
+    display: none;
+  }
+  .arena {
+    scroll-margin-top: 8px;
+  }
+  /* The buttons stay under the thumb even on short screens. */
+  .game-controls:has(.direction-controls) {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    padding-bottom: calc(20px + var(--safe-bottom));
+    box-shadow: 0 -8px 16px -8px #02070f;
+  }
+}
+/* Landscape phones: the pitch on the left, the controls on the right, nothing to scroll. */
+@media (orientation: landscape) and (max-height: 520px) and (max-width: 1000px) {
+  .intro-row,
+  .intro-meta {
+    display: none;
+  }
+  .header-inner {
+    min-height: 56px;
+    padding-block: 4px;
+  }
+  .main-content {
+    padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+    padding-top: 8px;
+  }
+  .game-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .arena {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(250px, 1fr);
+    grid-template-rows: auto 1fr auto;
+    scroll-margin-top: 4px;
+  }
+  .arena .scene {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+  }
+  .arena .hamster-bar,
+  .arena .game-controls,
+  .arena .direction-controls,
+  .arena .shootout-tracker {
+    grid-column: 2;
+  }
+  .arena .game-controls:has(.direction-controls) {
+    position: static;
+    box-shadow: none;
+  }
+  .arena .game-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pitch {
+    aspect-ratio: 800/540;
+  }
+  .pitch-role,
+  .locked-label {
+    display: none;
+  }
+}
+
+/* Very narrow phones: the block number lives in the side card, not over the kicker. */
+@media (max-width: 400px) {
+  .pitch-block {
+    display: none;
+  }
 }
