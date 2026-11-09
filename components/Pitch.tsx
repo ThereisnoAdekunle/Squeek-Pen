@@ -262,20 +262,15 @@ export default function Pitch({
           />
           <path d="M227 190H573" stroke="#e4fcff" strokeWidth="2" opacity=".8" />
           <g className="goalkeeper-position" transform="translate(350 222)">
-            <foreignObject
-              x="-10"
-              y="-4"
-              width="120"
-              height="136"
-              overflow="visible"
-            >
-              <div className="goalkeeper">
+            {/* Sprites are native SVG: Safari and iOS mis-place animated HTML embedded in an SVG. */}
+            <g className="goalkeeper">
+              <svg x="-10" y="-4" width="120" height="136" overflow="visible">
                 <Hamster
                   color={role === "kick" ? "orange" : "blue"}
                   sleepy={activity === "Nap"}
                 />
-              </div>
-            </foreignObject>
+              </svg>
+            </g>
           </g>
           {activity === "Nap" && !reveal && (
             <g fill="#a8c5ef" opacity=".8">
@@ -298,34 +293,24 @@ export default function Pitch({
           opacity=".5"
         />
         <g transform="translate(294 356)">
-          <foreignObject
-            x="0"
-            y="0"
-            width="98"
-            height="111"
-            overflow="visible"
-          >
-            <div className="kicker">
+          <g className="kicker">
+            <svg width="98" height="111" overflow="visible">
               <Hamster color={role === "kick" ? "blue" : "orange"} back />
-            </div>
-          </foreignObject>
+            </svg>
+          </g>
         </g>
         {activity === "Zoomies" && (
           <g className="sparkles" fill="#ffcb6c" transform="translate(4 70)">
             <path d="M318 332L321 322L324 332L334 335L324 338L321 348L318 338L308 335ZM292 369L294 362L296 369L303 371L296 373L294 380L292 373L285 371ZM366 315L368 308L370 315L377 317L370 319L368 326L366 319L359 317Z" />
           </g>
         )}
-        <foreignObject
-          x="381"
-          y="403"
-          width="38"
-          height="38"
-          overflow="visible"
-        >
-          <div className={`flying-ball ${reveal ? "fly" : ""}`}>
-            <Football />
-          </div>
-        </foreignObject>
+        <g transform="translate(381 403)">
+          <g className={`flying-ball ${reveal ? "fly" : ""}`}>
+            <svg width="38" height="38" overflow="visible">
+              <Football />
+            </svg>
+          </g>
+        </g>
         {phase === "choose" && (
           <g className="scene-targets" aria-hidden="true">
             {[-116, 0, 116].map((dx) => (

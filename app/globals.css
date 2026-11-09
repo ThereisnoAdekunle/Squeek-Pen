@@ -525,14 +525,16 @@ strong {
   color: #d2e9f6;
   opacity: 0.6;
 }
+/* The keeper, kicker and ball are native SVG groups. Their pivots are explicit coordinates
+   (not percentages), and both ends of every transition use the same function list, so the
+   motion is identical in Chrome, Safari and Firefox. */
 .goalkeeper {
-  width: 100%;
-  height: 100%;
-  transform-origin: 50% 85%;
+  transform: translate(50px, 111.6px) translateX(0px) rotate(0deg) translate(-50px, -111.6px);
   transition: transform var(--flight-time) var(--ease);
 }
 .revealing .goalkeeper {
-  transform: translateX(var(--dive-x)) rotate(var(--dive-rot));
+  transform: translate(50px, 111.6px) translateX(var(--dive-x)) rotate(var(--dive-rot))
+    translate(-50px, -111.6px);
 }
 /* The advantage shows in the motion too: a late keeper on Zoomies, an early one on Nap. */
 .activity-zoomies .goalkeeper {
@@ -602,30 +604,23 @@ strong {
   padding: 12px 18px;
 }
 .kicker {
-  width: 100%;
-  height: 100%;
-  transform-origin: 50% 95%;
+  transform: translate(0px, 0px) translate(49px, 105.5px) rotate(0deg) translate(-49px, -105.5px);
   transition: transform 400ms var(--ease);
 }
 .runup .kicker {
-  transform: translate(22px, -15px) rotate(-9deg);
+  transform: translate(22px, -15px) translate(49px, 105.5px) rotate(-9deg) translate(-49px, -105.5px);
 }
 .revealing .kicker {
-  transform: translate(20px, -12px) rotate(6deg);
+  transform: translate(20px, -12px) translate(49px, 105.5px) rotate(6deg) translate(-49px, -105.5px);
 }
+/* Ball: 38px sprite, pivot at its centre (19, 19). */
 .flying-ball {
-  width: 38px;
-  height: 38px;
-  transform-origin: 50% 50%;
+  transform: translate(0px, 0px) translate(19px, 19px) scale(1) rotate(0deg) translate(-19px, -19px);
   transition: transform var(--flight-time) cubic-bezier(0.2, 0.5, 0.3, 1);
 }
-.flying-ball svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
 .flying-ball.fly {
-  transform: translate(var(--shot-x), -172px) scale(0.58) rotate(290deg);
+  transform: translate(var(--shot-x), -172px) translate(19px, 19px) scale(0.58) rotate(290deg)
+    translate(-19px, -19px);
 }
 .revealing .ball-shadow {
   opacity: 0;
